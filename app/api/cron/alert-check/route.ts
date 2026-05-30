@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { isMarketHours } from "@/lib/market-data";
+import { getLtp } from "@/lib/ltp";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
@@ -18,11 +19,8 @@ export async function GET(req: Request) {
   let fired = 0;
   for (const alert of alerts) {
     try {
-      const res = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${alert.symbol}.NS?interval=1d&range=1d`, {
-        headers: { "User-Agent": "Mozilla/5.0" },
-      });
-      const meta = (await res.json())?.chart?.result?.[0]?.meta ?? {};
-      const ltp = meta.regularMarketPrice ?? 0;
+      const quote = await getLtp(alert.symbol, alert.exchange ?? "NSE");
+      const ltp = quote.ltp;
       if (!ltp) continue;
 
       const c = alert.condition, p = alert.price;

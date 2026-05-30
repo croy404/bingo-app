@@ -7,7 +7,7 @@ const fmtPct = (n: number | null | undefined) => n == null ? "—" : `${n >= 0 ?
 const cc = (n: number | null | undefined) => !n ? "text-slate-400" : n > 0 ? "text-green-400" : "text-red-400";
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
-type Tab = "dashboard" | "portfolio" | "intraday" | "watchlist" | "options" | "screener" | "journal" | "alerts" | "news" | "settings";
+type Tab = "dashboard" | "portfolio" | "intraday" | "watchlist" | "options" | "screener" | "journal" | "alerts" | "news" | "brokers" | "symbols" | "settings";
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -49,6 +49,15 @@ export default function Home() {
   const [optSym, setOptSym] = useState("NIFTY");
   const [screenerType, setScreenerType] = useState("gainers");
   const [journalNote, setJournalNote] = useState(""); const [jnDate, setJnDate] = useState(today());
+  // Broker state
+  const [iciciStatus, setIciciStatus] = useState<{ connected: boolean; userName?: string } | null>(null);
+  const [fyersStatus, setFyersStatus] = useState<{ connected: boolean; uid?: string } | null>(null);
+  const [iciKey, setIciKey] = useState(""); const [iciSecret, setIciSecret] = useState(""); const [iciToken, setIciToken] = useState("");
+  const [fyAppId, setFyAppId] = useState(""); const [fySecret, setFySecret] = useState("");
+  // Symbols state
+  const [symStatus, setSymStatus] = useState<{ total: number; byExchange: Record<string, number> } | null>(null);
+  const [symDownloading, setSymDownloading] = useState(false);
+  const [symQuery, setSymQuery] = useState(""); const [symResults, setSymResults] = useState<{ symbol: string; name: string; exchange: string; type: string }[]>([]);
 
   const loadDashboard = useCallback(async () => {
     const [s, i, n, b, fd] = await Promise.all([
@@ -70,8 +79,12 @@ export default function Home() {
     if (t === "intraday") { const [tr, sm] = await Promise.all([api(`/intraday?date=${idDate}`), api(`/intraday/summary?date=${idDate}`)]); setIntraday(tr); setIntradaySummary(sm); }
     if (t === "screener") { const [sc, sr] = await Promise.all([api(`/market/screener?type=${screenerType}`), api("/market/sector-rotation")]); setScreener(sc); setSectorRot(sr); }
     if (t === "news") { const r = await api("/market/news"); setNews(r.items ?? []); }
+    if (t === "brokers") { const [ic, fy] = await Promise.all([api("/broker/icici/status"), api("/broker/fyers/status")]); setIciciStatus(ic); setFyersStatus(fy); }
+    if (t === "symbols") { const r = await api("/symbols/status"); setSymStatus(r); }
     if (t === "settings") { const [s, ai] = await Promise.all([api("/settings"), api("/ai/status")]); setSettings(s); setAiStatus(ai); }
   };
+
+  const refreshBrokers = async () => { const [ic, fy] = await Promise.all([api("/broker/icici/status"), api("/broker/fyers/status")]); setIciciStatus(ic); setFyersStatus(fy); };
 
   const tabCls = (t: Tab) => `cursor-pointer px-3 py-1.5 rounded-md text-sm transition-colors whitespace-nowrap ${tab===t ? "bg-blue-600 text-white" : "text-slate-400 hover:bg-slate-700"}`;
   const inp = "bg-slate-900 border border-slate-600 rounded-md px-3 py-1.5 text-slate-200 text-sm w-full";
@@ -93,7 +106,7 @@ export default function Home() {
 
       {/* Tabs */}
       <div className="flex gap-1 px-6 py-2 border-b border-slate-700 overflow-x-auto bg-slate-900">
-        {(["dashboard","portfolio","intraday","watchlist","options","screener","journal","alerts","news","settings"] as Tab[]).map(t => (
+        {(["dashboard","portfolio","intraday","watchlist","options","screener","journal","alerts","news","brokers","symbols","settings"] as Tab[]).map(t => (
           <div key={t} className={tabCls(t)} onClick={() => switchTab(t)}>{t.charAt(0).toUpperCase()+t.slice(1)}</div>
         ))}
       </div>
@@ -497,6 +510,116 @@ export default function Home() {
               </div>
             ))}
             {!news.length && <div className="text-center text-slate-500 py-10">No news loaded yet</div>}
+          </div>
+        )}
+
+        {/* ─── BROKERS ─── */}
+        {tab === "brokers" && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* ICICI Breeze */}
+            <div className={card}>
+              <div className="flex justify-between items-center mb-3">
+                <div className="text-sm font-semibold">🏦 ICICI Direct (Breeze)</div>
+                <span className={`text-xs px-2 py-0.5 rounded ${iciciStatus?.connected ? "bg-green-900 text-green-400" : "bg-slate-700 text-slate-400"}`}>
+                  {iciciStatus?.connected ? `✓ ${iciciStatus.userName}` : "Not connected"}
+                </span>
+              </div>
+              {iciciStatus?.connected ? (
+                <button className={btn("bg-red-600 text-white")} onClick={async()=>{await api("/broker/icici/disconnect",{method:"POST"});refreshBrokers();}}>Disconnect</button>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs text-slate-500">1. Enter API Key + Secret from api.icicidirect.com<br/>2. Click &quot;Open Login&quot; → log in → copy the API_Session token from the redirect URL<br/>3. Paste it below + Connect</p>
+                  <input className={inp} placeholder="API Key" value={iciKey} onChange={e=>setIciKey(e.target.value)} />
+                  <input className={inp} placeholder="API Secret" type="password" value={iciSecret} onChange={e=>setIciSecret(e.target.value)} />
+                  <div className="flex gap-2">
+                    <button className={btn("bg-slate-600 text-white")} onClick={async()=>{
+                      if(!iciKey){alert("Enter API Key first");return;}
+                      const r=await api(`/broker/icici/login-url?apiKey=${encodeURIComponent(iciKey)}`);
+                      if(r.loginUrl) window.open(r.loginUrl,"_blank");
+                    }}>Open Login</button>
+                  </div>
+                  <input className={inp} placeholder="API_Session token (from redirect URL)" value={iciToken} onChange={e=>setIciToken(e.target.value)} />
+                  <button className={btn("bg-blue-600 text-white")} onClick={async()=>{
+                    if(!iciKey||!iciSecret||!iciToken){alert("Fill all 3 fields");return;}
+                    const r=await api("/broker/icici/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({apiKey:iciKey,apiSecret:iciSecret,sessionToken:iciToken})});
+                    if(r.success){alert("Connected as "+r.userName);refreshBrokers();}else alert("Failed: "+(r.error||"unknown"));
+                  }}>Connect</button>
+                </div>
+              )}
+            </div>
+            {/* Fyers */}
+            <div className={card}>
+              <div className="flex justify-between items-center mb-3">
+                <div className="text-sm font-semibold">🏦 Fyers</div>
+                <span className={`text-xs px-2 py-0.5 rounded ${fyersStatus?.connected ? "bg-green-900 text-green-400" : "bg-slate-700 text-slate-400"}`}>
+                  {fyersStatus?.connected ? `✓ ${fyersStatus.uid}` : "Not connected"}
+                </span>
+              </div>
+              {fyersStatus?.connected ? (
+                <button className={btn("bg-red-600 text-white")} onClick={async()=>{await api("/broker/fyers/disconnect",{method:"POST"});refreshBrokers();}}>Disconnect</button>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs text-slate-500">1. Create an app at myapi.fyers.in (redirect URL = this site + /api/broker/fyers/callback)<br/>2. Enter App ID + Secret → Connect (opens Fyers login popup)</p>
+                  <input className={inp} placeholder="App ID (e.g. ABC123-100)" value={fyAppId} onChange={e=>setFyAppId(e.target.value)} />
+                  <input className={inp} placeholder="Secret Key" type="password" value={fySecret} onChange={e=>setFySecret(e.target.value)} />
+                  <button className={btn("bg-blue-600 text-white")} onClick={async()=>{
+                    if(!fyAppId||!fySecret){alert("Fill App ID and Secret");return;}
+                    const r=await api("/broker/fyers/prepare",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({appId:fyAppId,secret:fySecret})});
+                    if(r.loginUrl){window.open(r.loginUrl,"_blank");setTimeout(refreshBrokers,8000);}else alert("Failed: "+(r.error||"unknown"));
+                  }}>Connect via Fyers Login</button>
+                </div>
+              )}
+            </div>
+            <div className={`${card} md:col-span-2`}>
+              <p className="text-xs text-slate-500">💡 When a broker is connected, all LTP/quotes across the app use real-time broker data. Without a broker, prices fall back to Yahoo Finance (~15-min delay). Historical candles require a connected broker.</p>
+            </div>
+          </div>
+        )}
+
+        {/* ─── SYMBOLS ─── */}
+        {tab === "symbols" && (
+          <div>
+            <div className={`${card} mb-4`}>
+              <div className="flex justify-between items-center mb-3">
+                <div className="text-sm font-semibold">📥 Symbol Master</div>
+                <span className="text-xs text-slate-400">Total stored: <b>{symStatus?.total ?? 0}</b></span>
+              </div>
+              <p className="text-xs text-slate-500 mb-3">Download scrip masters from NSE (equity), NSE F&O, BSE, MCX (commodities), AMFI (mutual funds). Stored in your Supabase DB for symbol search.</p>
+              <button className={btn("bg-blue-600 text-white")} disabled={symDownloading} onClick={async()=>{
+                setSymDownloading(true);
+                const r=await api("/symbols/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({exchanges:["NSE","NFO","BSE","MCX","MF"]})});
+                setSymDownloading(false);
+                alert("Download complete:\n"+JSON.stringify(r.result,null,2));
+                const st=await api("/symbols/status");setSymStatus(st);
+              }}>{symDownloading ? "Downloading… (takes ~30s)" : "Download All Symbols"}</button>
+              {symStatus && (
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-3">
+                  {Object.entries(symStatus.byExchange).map(([ex,n]) => (
+                    <div key={ex} className="bg-slate-900 rounded-lg p-2 text-center">
+                      <div className="text-xs text-slate-500">{ex}</div>
+                      <div className="font-bold">{n}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className={card}>
+              <div className="text-sm font-semibold mb-2">🔍 Search Symbols</div>
+              <div className="flex gap-2 mb-3">
+                <input className={inp} placeholder="Type symbol (e.g. RELI, GOLD, fund name)" value={symQuery}
+                  onChange={async e=>{const q=e.target.value;setSymQuery(q);if(q.length>=2){const r=await api(`/symbols/search?q=${encodeURIComponent(q)}&limit=30`);setSymResults(r);}else setSymResults([]);}} />
+              </div>
+              <table className="w-full text-sm"><thead><tr className="text-slate-500 text-xs border-b border-slate-700"><th className="text-left py-1">Symbol</th><th className="text-left">Name</th><th>Exchange</th><th>Type</th></tr></thead>
+              <tbody>{symResults.map((s,i) => (
+                <tr key={i} className="border-b border-slate-800">
+                  <td className="py-1 font-semibold">{s.symbol}</td>
+                  <td className="text-slate-400 text-xs">{s.name}</td>
+                  <td className="text-center"><span className="text-xs bg-slate-700 px-1.5 py-0.5 rounded">{s.exchange}</span></td>
+                  <td className="text-center text-xs text-slate-400">{s.type}</td>
+                </tr>
+              ))}</tbody></table>
+              {symQuery.length>=2 && !symResults.length && <div className="text-center text-slate-500 py-4">No matches — download symbols first</div>}
+            </div>
           </div>
         )}
 
