@@ -13,8 +13,8 @@ RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# Ensure the build itself never runs in production mode (keeps devDeps active)
-ENV NODE_ENV=development
+# devDeps are already installed (deps stage used --include=dev), so next build
+# can run in production mode (required for correct static prerendering).
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npx prisma generate && npm run build
 
