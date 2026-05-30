@@ -4,7 +4,8 @@ RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY prisma ./prisma
-RUN npm ci
+# Force dev deps even if NODE_ENV=production is injected (build needs typescript, tailwind, prisma CLI, etc.)
+RUN npm ci --include=dev
 
 # ─── Stage 2: build ───────────────────────────────────────────────────────────
 FROM node:22-alpine AS builder
@@ -12,7 +13,8 @@ RUN apk add --no-cache libc6-compat openssl
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# DATABASE_URL is needed only for prisma generate (no DB connection at build)
+# Ensure the build itself never runs in production mode (keeps devDeps active)
+ENV NODE_ENV=development
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npx prisma generate && npm run build
 
