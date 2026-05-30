@@ -1,14 +1,12 @@
 import { NextResponse } from "next/server";
 import { askAI, checkUserLimit } from "@/lib/ai-provider";
-import { supabase } from "@/lib/supabase";
+import { prisma } from "@/lib/db";
 import { istToday } from "@/lib/market-data";
 export const dynamic = "force-dynamic";
 export async function GET() {
   if (!checkUserLimit()) return NextResponse.json({ error: "Rate limit reached" }, { status: 429 });
-  const today = istToday();
-  const { data: trades } = await supabase.from("intraday_trades").select("*").eq("trade_date", today);
-  if (!trades?.length) return NextResponse.json({ summary: "No intraday trades logged today.", provider: "none", trades: 0 });
-  // FIFO realised
+  const trades = await prisma.intradayTrade.findMany({ where: { tradeDate: new Date(istToday()) } });
+  if (!trades.length) return NextResponse.json({ summary: "No intraday trades logged today.", provider: "none", trades: 0 });
   const lots: Record<string, { qty: number; price: number }[]> = {};
   const realised: Record<string, number> = {};
   let turnover = 0;
@@ -23,7 +21,7 @@ export async function GET() {
   const losers = Object.values(realised).filter(p => p < 0).length;
   try {
     const r = await askAI(
-      `Intraday ${today}: ${trades.length} trades, turnover ₹${turnover.toFixed(0)}, realised P&L ₹${total.toFixed(0)} (W:${wins} L:${losers}).\n\n4 bullets (<=20 words): session commentary, what worked, fix for tomorrow, discipline grade A-F.`,
+      `Intraday ${istToday()}: ${trades.length} trades, turnover ₹${turnover.toFixed(0)}, realised P&L ₹${total.toFixed(0)} (W:${wins} L:${losers}).\n\n4 bullets (<=20 words): session commentary, what worked, fix for tomorrow, discipline grade A-F.`,
       "You are a disciplined Indian intraday trading coach.", 400, "market_insight");
     return NextResponse.json({ summary: r.text, provider: r.provider, trades: trades.length, realisedPnl: total, winners: wins, losers });
   } catch { return NextResponse.json({ error: "AI unavailable" }, { status: 503 }); }

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { askAI, checkUserLimit } from "@/lib/ai-provider";
-import { supabase } from "@/lib/supabase";
+import { prisma } from "@/lib/db";
 export const dynamic = "force-dynamic";
 export async function POST() {
   if (!checkUserLimit()) return NextResponse.json({ error: "Rate limit reached" }, { status: 429 });
-  const { data: holdings } = await supabase.from("portfolio").select("symbol,sector");
-  if (!holdings?.length) return NextResponse.json({ error: "No holdings" }, { status: 400 });
+  const holdings = await prisma.portfolio.findMany({ select: { symbol: true, sector: true } });
+  if (!holdings.length) return NextResponse.json({ error: "No holdings" }, { status: 400 });
   const list = holdings.map(h => `${h.symbol}${h.sector ? ` [${h.sector}]` : ""}`).join(", ");
   try {
     const r = await askAI(

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { askAI, checkUserLimit } from "@/lib/ai-provider";
-import { supabase } from "@/lib/supabase";
+import { prisma } from "@/lib/db";
 export const dynamic = "force-dynamic";
 export async function POST() {
   if (!checkUserLimit()) return NextResponse.json({ error: "Rate limit reached" }, { status: 429 });
-  const { data: holdings } = await supabase.from("portfolio").select("symbol,qty,avg_price,sector");
-  if (!holdings?.length) return NextResponse.json({ error: "No holdings" }, { status: 400 });
-  const block = holdings.map(h => `${h.symbol} [${h.sector ?? ""}]: qty ${h.qty} @ ₹${h.avg_price}`).join("\n");
+  const holdings = await prisma.portfolio.findMany({ select: { symbol: true, qty: true, avgPrice: true, sector: true } });
+  if (!holdings.length) return NextResponse.json({ error: "No holdings" }, { status: 400 });
+  const block = holdings.map(h => `${h.symbol} [${h.sector ?? ""}]: qty ${h.qty} @ ₹${h.avgPrice}`).join("\n");
   try {
     const r = await askAI(
       `Portfolio:\n${block}\n\nReturn ONLY JSON: {overallScore:number(0-100),verdict:'high-risk'|'moderate'|'well-diversified',topRisks:[],suggestedActions:[]}`,

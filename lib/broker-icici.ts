@@ -5,7 +5,7 @@
  * - REST LTP + historical (no persistent WebSocket on serverless)
  */
 import crypto from "crypto";
-import { supabase } from "./supabase";
+import { prisma } from "./db";
 
 const BREEZE_BASE = "https://api.icicidirect.com/breezeapi/api/v1";
 export const SECURITY_MASTER_URL = "https://directlink.icicidirect.com/NewSecurityMaster/SecurityMaster.zip";
@@ -78,26 +78,29 @@ export async function generateSession(apiKey: string, apiSecret: string, apiSess
     iciUserId: s.idirect_userid,
     userName: s.idirect_user_name,
   };
-  // Persist to Supabase (single-user app → one row)
-  await supabase.from("broker_sessions").delete().eq("broker", "icici");
-  await supabase.from("broker_sessions").insert({ broker: "icici", session_data: session });
+  // Persist (single-user app → one row per broker)
+  await prisma.brokerSession.upsert({
+    where: { broker: "icici" },
+    create: { broker: "icici", sessionData: session as unknown as object },
+    update: { sessionData: session as unknown as object },
+  });
   return session;
 }
 
 export async function getSession(): Promise<BreezeSession | null> {
-  const { data } = await supabase.from("broker_sessions").select("session_data").eq("broker", "icici").maybeSingle();
-  return (data?.session_data as BreezeSession) ?? null;
+  const row = await prisma.brokerSession.findUnique({ where: { broker: "icici" } });
+  return (row?.sessionData as unknown as BreezeSession) ?? null;
 }
 
 export async function clearSession(): Promise<void> {
-  await supabase.from("broker_sessions").delete().eq("broker", "icici");
+  await prisma.brokerSession.deleteMany({ where: { broker: "icici" } });
 }
 
 /** Resolve NSE symbol → ICICI trading code using cached Security Master, then overrides */
 export async function resolveSymbol(nseSymbol: string): Promise<string> {
   const upper = nseSymbol.toUpperCase().trim();
-  const { data } = await supabase.from("symbols").select("token").eq("symbol", upper).eq("exchange", "ICICI").maybeSingle();
-  if (data?.token) return data.token;
+  const row = await prisma.symbol.findUnique({ where: { symbol_exchange: { symbol: upper, exchange: "ICICI" } } });
+  if (row?.token) return row.token;
   return SYMBOL_OVERRIDES[upper] ?? upper;
 }
 

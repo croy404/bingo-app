@@ -1,0 +1,191 @@
+/**
+ * BINGO Background Worker — always-on process (runs in its own container)
+ *
+ * Responsibilities:
+ *   - Alert monitor: checks active alerts every 30s during market hours,
+ *     fires Telegram + WhatsApp notifications, respects cooldowns.
+ *   - Morning brief: 08:30 IST weekdays → AI-generated, sent to Telegram.
+ *   - EOD P&L summary: 15:35 IST weekdays → intraday realised P&L to Telegram.
+ *   - Broker price streaming: when a broker session exists, polls LTP for
+ *     watchlist + portfolio symbols into Redis so the web app reads them fast.
+ *
+ * This is the piece serverless/Vercel could NOT do (no persistent process).
+ */
+import { prisma } from "../lib/db";
+import { redis, cacheSet } from "../lib/redis";
+import { askAI } from "../lib/ai-provider";
+import { getLtp } from "../lib/ltp";
+import { isMarketHours, istNow, istToday, NSE_HOLIDAYS } from "../lib/market-data";
+
+const log = (...a: unknown[]) => console.log(new Date().toISOString(), "[worker]", ...a);
+
+async function getConfig() {
+  const rows = await prisma.setting.findMany();
+  return Object.fromEntries(rows.map((r) => [r.key, r.value ?? ""]));
+}
+
+async function sendTelegram(text: string) {
+  const cfg = await getConfig();
+  if (!cfg.tg_token || !cfg.tg_chat_id) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${cfg.tg_token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: cfg.tg_chat_id, text, parse_mode: "HTML" }),
+    });
+  } catch (e) {
+    log("telegram send failed", e);
+  }
+}
+
+async function sendWhatsApp(text: string) {
+  const cfg = await getConfig();
+  if (!cfg.wa_phone || !cfg.wa_apikey) return;
+  try {
+    await fetch(`https://api.callmebot.com/whatsapp.php?phone=${cfg.wa_phone}&text=${encodeURIComponent(text)}&apikey=${cfg.wa_apikey}`);
+  } catch { /* non-fatal */ }
+}
+
+// ─── Alert Monitor ────────────────────────────────────────────────────────────
+let alertRunning = false;
+async function checkAlerts() {
+  if (alertRunning) return;
+  if (!isMarketHours()) return;
+  alertRunning = true;
+  try {
+    const alerts = await prisma.alert.findMany({ where: { isActive: true }, take: 500 });
+    for (const alert of alerts) {
+      try {
+        const q = await getLtp(alert.symbol, alert.exchange);
+        const ltp = q.ltp;
+        if (!ltp) continue;
+        const c = alert.condition, p = alert.price;
+        const triggered = (c === ">" && ltp > p) || (c === ">=" && ltp >= p) || (c === "<" && ltp < p) || (c === "<=" && ltp <= p);
+        if (!triggered) continue;
+        if (alert.lastTriggeredAt && Date.now() - alert.lastTriggeredAt.getTime() < (alert.cooldownMins ?? 5) * 60000) continue;
+
+        await prisma.alertHistory.create({ data: { alertId: alert.id, symbol: alert.symbol, exchange: alert.exchange, condition: c, targetPrice: p, triggeredLtp: ltp } });
+        await prisma.alert.update({
+          where: { id: alert.id },
+          data: { triggeredCount: alert.triggeredCount + 1, lastTriggeredAt: new Date(), ...(alert.alertType === "once" ? { isActive: false } : {}) },
+        });
+        const dir = c === ">" || c === ">=" ? "crossed above" : "dropped below";
+        const msg = `⚡ <b>Alert Triggered!</b>\n📊 <b>${alert.symbol}</b> · ${alert.exchange}\n💵 LTP: ₹${ltp.toFixed(2)} ${dir} ₹${p}\n📡 ${q.source}\n🕐 ${istNow().toISOString().slice(11, 16)} IST`;
+        await sendTelegram(msg);
+        await sendWhatsApp(`BINGO Alert: ${alert.symbol} ${c} ${p} | LTP ${ltp.toFixed(2)}`);
+        log("alert fired", alert.symbol, c, p, "ltp", ltp);
+      } catch (e) {
+        log("alert check error", alert.symbol, e);
+      }
+    }
+  } finally {
+    alertRunning = false;
+  }
+}
+
+// ─── Broker price streaming → Redis ────────────────────────────────────────────
+async function streamPrices() {
+  if (!isMarketHours()) return;
+  try {
+    const [wl, port] = await Promise.all([
+      prisma.watchlist.findMany({ select: { symbol: true, exchange: true } }),
+      prisma.portfolio.findMany({ select: { symbol: true, exchange: true } }),
+    ]);
+    const seen = new Set<string>();
+    const symbols = [...wl, ...port].filter((s) => {
+      const k = `${s.exchange}:${s.symbol}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+    for (const s of symbols) {
+      const q = await getLtp(s.symbol, s.exchange);
+      if (q.ltp > 0) await cacheSet(`price:${s.exchange}:${s.symbol}`, q, 60);
+    }
+    if (symbols.length) log("streamed", symbols.length, "prices to redis");
+  } catch (e) {
+    log("price stream error", e);
+  }
+}
+
+// ─── Scheduled jobs (morning brief, EOD P&L) ───────────────────────────────────
+let lastBriefDate = "";
+let lastEodDate = "";
+
+async function runMorningBrief() {
+  const ist = istNow();
+  const today = istToday();
+  if (lastBriefDate === today) return;
+  if (ist.getUTCDay() === 0 || ist.getUTCDay() === 6) return;
+  if (NSE_HOLIDAYS.has(today.replace(/-/g, ""))) return;
+  // 08:30 IST window
+  if (!(ist.getUTCHours() === 8 && ist.getUTCMinutes() >= 28 && ist.getUTCMinutes() <= 34)) return;
+  lastBriefDate = today;
+  try {
+    const fii = await prisma.fiiDiiHistory.findFirst({ orderBy: { date: "desc" } });
+    const fiiLine = fii ? `FII ₹${((fii.fiiNet ?? 0) / 100).toFixed(0)}Cr, DII ₹${((fii.diiNet ?? 0) / 100).toFixed(0)}Cr` : "";
+    const r = await askAI(
+      `Pre-market Indian market brief. ${fiiLine}. Nifty outlook, key sectors, 2 stocks to watch, 1 risk. 5 bullets, max 180 words.`,
+      "You are a senior Indian equity analyst.", 400, "market_insight");
+    await sendTelegram(`🌅 <b>BINGO Morning Brief — ${today}</b>\n━━━━━━━━━━━━━━\n${r.text}\n\n<i>via ${r.provider}</i>`);
+    log("morning brief sent");
+  } catch (e) {
+    log("morning brief failed", e);
+  }
+}
+
+async function runEodPnl() {
+  const ist = istNow();
+  const today = istToday();
+  if (lastEodDate === today) return;
+  if (ist.getUTCDay() === 0 || ist.getUTCDay() === 6) return;
+  if (NSE_HOLIDAYS.has(today.replace(/-/g, ""))) return;
+  // 15:35 IST window
+  if (!(ist.getUTCHours() === 15 && ist.getUTCMinutes() >= 33 && ist.getUTCMinutes() <= 39)) return;
+  lastEodDate = today;
+  try {
+    const trades = await prisma.intradayTrade.findMany({ where: { tradeDate: new Date(today) } });
+    if (!trades.length) return;
+    const lots: Record<string, { qty: number; price: number }[]> = {};
+    const realised: Record<string, number> = {};
+    let turnover = 0;
+    for (const t of trades) {
+      const k = t.symbol; turnover += t.qty * t.price;
+      lots[k] ??= []; realised[k] ??= 0;
+      if (t.side === "BUY") lots[k].push({ qty: t.qty, price: t.price });
+      else { let rem = t.qty; while (rem > 0 && lots[k].length) { const lot = lots[k][0]; const u = Math.min(rem, lot.qty); realised[k] += u * (t.price - lot.price); lot.qty -= u; rem -= u; if (lot.qty <= 0) lots[k].shift(); } }
+    }
+    const total = Object.values(realised).reduce((s, p) => s + p, 0);
+    const wins = Object.values(realised).filter((p) => p > 0).length;
+    const losers = Object.values(realised).filter((p) => p < 0).length;
+    await sendTelegram(`📊 <b>EOD P&L Summary — ${today}</b>\n━━━━━━━━━━━━━━\n${total >= 0 ? "🟢" : "🔴"} Net: ₹${total.toFixed(2)}\nTrades: ${trades.length} | W:${wins} L:${losers}\nTurnover: ₹${turnover.toFixed(0)}`);
+    log("eod pnl sent");
+  } catch (e) {
+    log("eod pnl failed", e);
+  }
+}
+
+// ─── Main loops ────────────────────────────────────────────────────────────────
+async function main() {
+  log("BINGO worker starting…");
+  try { await redis.ping(); log("redis connected"); } catch (e) { log("redis NOT connected", e); }
+  try { await prisma.$queryRaw`SELECT 1`; log("postgres connected"); } catch (e) { log("postgres NOT connected", e); }
+
+  // Alert monitor + price streaming every 30s
+  setInterval(() => { void checkAlerts(); }, 30_000);
+  setInterval(() => { void streamPrices(); }, 30_000);
+  // Schedule checks every minute
+  setInterval(() => { void runMorningBrief(); void runEodPnl(); }, 60_000);
+
+  // Kick off immediately
+  void checkAlerts();
+  void streamPrices();
+
+  log("worker running — alert monitor (30s), price stream (30s), schedulers (60s)");
+}
+
+main().catch((e) => { log("fatal", e); process.exit(1); });
+
+// Graceful shutdown
+process.on("SIGTERM", async () => { log("SIGTERM — shutting down"); await prisma.$disconnect(); await redis.quit(); process.exit(0); });
+process.on("SIGINT", async () => { log("SIGINT — shutting down"); await prisma.$disconnect(); await redis.quit(); process.exit(0); });

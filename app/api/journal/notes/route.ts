@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { prisma } from "@/lib/db";
 export const dynamic = "force-dynamic";
+
 export async function GET(req: Request) {
   const date = new URL(req.url).searchParams.get("date") ?? "";
-  const { data } = await supabase.from("journal_notes").select("*").eq("note_date", date).single();
-  return NextResponse.json(data ?? { note_date: date, content: "" });
+  const row = await prisma.journalNote.findUnique({ where: { noteDate: new Date(date) } });
+  return NextResponse.json({ note_date: date, content: row?.content ?? "" });
 }
 export async function PUT(req: Request) {
   const { date, content } = await req.json();
-  await supabase.from("journal_notes").upsert({ note_date: date, content });
+  await prisma.journalNote.upsert({
+    where: { noteDate: new Date(date) },
+    create: { noteDate: new Date(date), content },
+    update: { content, updatedAt: new Date() },
+  });
   return NextResponse.json({ note_date: date, content });
 }

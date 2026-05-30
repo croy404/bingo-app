@@ -5,7 +5,7 @@
  * - REST quote + historical
  */
 import crypto from "crypto";
-import { supabase } from "./supabase";
+import { prisma } from "./db";
 
 const FYERS_BASE = "https://api-t1.fyers.in/api/v3";
 const FYERS_DATA = "https://api-t1.fyers.in/data";
@@ -26,18 +26,21 @@ export async function exchangeToken(appId: string, secretKey: string, code: stri
   const data = await res.json();
   if (data.s !== "ok" || !data.access_token) throw new Error(data.message || "Fyers token exchange failed");
   const session: FyersSession = { uid: appId.split("-")[0] ?? appId, appId, accessToken: data.access_token };
-  await supabase.from("broker_sessions").delete().eq("broker", "fyers");
-  await supabase.from("broker_sessions").insert({ broker: "fyers", session_data: session });
+  await prisma.brokerSession.upsert({
+    where: { broker: "fyers" },
+    create: { broker: "fyers", sessionData: session as unknown as object },
+    update: { sessionData: session as unknown as object },
+  });
   return session;
 }
 
 export async function getSession(): Promise<FyersSession | null> {
-  const { data } = await supabase.from("broker_sessions").select("session_data").eq("broker", "fyers").maybeSingle();
-  return (data?.session_data as FyersSession) ?? null;
+  const row = await prisma.brokerSession.findUnique({ where: { broker: "fyers" } });
+  return (row?.sessionData as unknown as FyersSession) ?? null;
 }
 
 export async function clearSession(): Promise<void> {
-  await supabase.from("broker_sessions").delete().eq("broker", "fyers");
+  await prisma.brokerSession.deleteMany({ where: { broker: "fyers" } });
 }
 
 export function toFyersSymbol(exchange: string, symbol: string, series = ""): string {

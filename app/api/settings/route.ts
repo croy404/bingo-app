@@ -1,18 +1,19 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { prisma } from "@/lib/db";
 export const dynamic = "force-dynamic";
-const SECRETS = ["tg_token","tg_token2","wa_apikey","icici_secret","fyers_secret"];
+const SECRETS = ["tg_token", "tg_token2", "wa_apikey", "icici_secret", "fyers_secret"];
+
 export async function GET() {
-  const { data } = await supabase.from("settings").select("key,value");
+  const rows = await prisma.setting.findMany();
   const d: Record<string, string> = {};
-  for (const r of data ?? []) d[r.key] = SECRETS.includes(r.key) ? "***saved***" : r.value;
+  for (const r of rows) d[r.key] = SECRETS.includes(r.key) && r.value ? "***saved***" : (r.value ?? "");
   return NextResponse.json(d);
 }
 export async function POST(req: Request) {
   const body = await req.json();
-  for (const [k, v] of Object.entries(body)) {
-    if (v && v !== "***saved***") {
-      await supabase.from("settings").upsert({ key: k, value: String(v) });
+  for (const [key, value] of Object.entries(body)) {
+    if (value && value !== "***saved***") {
+      await prisma.setting.upsert({ where: { key }, create: { key, value: String(value) }, update: { value: String(value), updatedAt: new Date() } });
     }
   }
   return NextResponse.json({ message: "Saved" });

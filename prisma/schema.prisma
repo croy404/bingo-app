@@ -1,0 +1,195 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Portfolio {
+  id           Int      @id @default(autoincrement())
+  symbol       String
+  exchange     String   @default("NSE")
+  companyName  String?  @map("company_name")
+  qty          Float
+  avgPrice     Float    @map("avg_price")
+  buyDate      DateTime? @map("buy_date") @db.Date
+  sector       String?
+  marketCap    String?  @map("market_cap")
+  notes        String?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([symbol])
+  @@map("portfolio")
+}
+
+model PortfolioSnapshot {
+  snapshotDate  DateTime @id @map("snapshot_date") @db.Date
+  totalValue    Float?   @map("total_value")
+  investedValue Float?   @map("invested_value")
+  pnl           Float?
+  pnlPercent    Float?   @map("pnl_percent")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("portfolio_snapshots")
+}
+
+model SipEntry {
+  id           Int      @id @default(autoincrement())
+  name         String
+  symbol       String
+  exchange     String   @default("NSE")
+  isin         String?
+  frequency    String   @default("monthly")
+  amount       Float
+  startDate    DateTime? @map("start_date") @db.Date
+  createdAt    DateTime @default(now()) @map("created_at")
+  transactions SipTransaction[]
+
+  @@map("sip_entries")
+}
+
+model SipTransaction {
+  id              Int      @id @default(autoincrement())
+  sipId           Int      @map("sip_id")
+  transactionDate DateTime @map("transaction_date") @db.Date
+  amount          Float
+  units           Float
+  nav             Float
+  createdAt       DateTime @default(now()) @map("created_at")
+  sip             SipEntry @relation(fields: [sipId], references: [id], onDelete: Cascade)
+
+  @@map("sip_transactions")
+}
+
+model Watchlist {
+  id       Int      @id @default(autoincrement())
+  symbol   String
+  exchange String   @default("NSE")
+  addedAt  DateTime @default(now()) @map("added_at")
+
+  @@unique([symbol, exchange])
+  @@index([symbol])
+  @@map("watchlist")
+}
+
+model IntradayTrade {
+  id        Int      @id @default(autoincrement())
+  tradeDate DateTime @map("trade_date") @db.Date
+  symbol    String
+  exchange  String   @default("NSE")
+  side      String
+  qty       Float
+  price     Float
+  notes     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([tradeDate])
+  @@map("intraday_trades")
+}
+
+model Journal {
+  id         Int      @id @default(autoincrement())
+  tradeDate  DateTime @map("trade_date") @db.Date
+  symbol     String
+  direction  String
+  qty        Float
+  entryPrice Float    @map("entry_price")
+  exitPrice  Float?   @map("exit_price")
+  pnl        Float?
+  setup      String?
+  emotion    String?
+  notes      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([tradeDate])
+  @@map("journal")
+}
+
+model JournalNote {
+  noteDate  DateTime @id @map("note_date") @db.Date
+  content   String?
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  @@map("journal_notes")
+}
+
+model Alert {
+  id              Int       @id @default(autoincrement())
+  symbol          String
+  exchange        String    @default("NSE")
+  companyName     String?   @map("company_name")
+  condition       String
+  price           Float
+  alertType       String    @default("once") @map("alert_type")
+  cooldownMins    Int       @default(5) @map("cooldown_mins")
+  remarks         String?
+  tag             String?
+  isActive        Boolean   @default(true) @map("is_active")
+  triggeredCount  Int       @default(0) @map("triggered_count")
+  lastTriggeredAt DateTime? @map("last_triggered_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@index([isActive])
+  @@index([symbol])
+  @@map("alerts")
+}
+
+model AlertHistory {
+  id           Int      @id @default(autoincrement())
+  alertId      Int?     @map("alert_id")
+  symbol       String
+  exchange     String   @default("NSE")
+  condition    String?
+  targetPrice  Float?   @map("target_price")
+  triggeredLtp Float?   @map("triggered_ltp")
+  remarks      String?
+  triggeredAt  DateTime @default(now()) @map("triggered_at")
+
+  @@index([triggeredAt])
+  @@map("alert_history")
+}
+
+model FiiDiiHistory {
+  date      DateTime @id @db.Date
+  fiiNet    Float?   @map("fii_net")
+  diiNet    Float?   @map("dii_net")
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  @@map("fii_dii_history")
+}
+
+model Setting {
+  key       String   @id
+  value     String?
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  @@map("settings")
+}
+
+model BrokerSession {
+  id          Int      @id @default(autoincrement())
+  broker      String   @unique
+  sessionData Json     @map("session_data")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("broker_sessions")
+}
+
+model Symbol {
+  id        Int      @id @default(autoincrement())
+  symbol    String
+  name      String?
+  exchange  String
+  type      String   @default("equity")
+  series    String?
+  isin      String?
+  token     String?
+  updatedAt DateTime @default(now()) @map("updated_at")
+
+  @@unique([symbol, exchange])
+  @@index([symbol])
+  @@index([exchange])
+  @@map("symbols")
+}

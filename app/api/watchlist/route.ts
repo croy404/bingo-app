@@ -1,17 +1,21 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { prisma } from "@/lib/db";
 export const dynamic = "force-dynamic";
+
 export async function GET() {
-  const { data } = await supabase.from("watchlist").select("*").order("symbol");
-  return NextResponse.json(data ?? []);
+  return NextResponse.json(await prisma.watchlist.findMany({ orderBy: { symbol: "asc" } }));
 }
 export async function POST(req: Request) {
   const { symbol, exchange = "NSE" } = await req.json();
-  await supabase.from("watchlist").upsert({ symbol: symbol.toUpperCase(), exchange }, { onConflict: "symbol,exchange" });
+  await prisma.watchlist.upsert({
+    where: { symbol_exchange: { symbol: symbol.toUpperCase(), exchange } },
+    create: { symbol: symbol.toUpperCase(), exchange },
+    update: {},
+  });
   return NextResponse.json({ message: "Added" });
 }
 export async function DELETE(req: Request) {
   const { id } = await req.json();
-  await supabase.from("watchlist").delete().eq("id", id);
+  await prisma.watchlist.delete({ where: { id: Number(id) } });
   return NextResponse.json({ message: "Deleted" });
 }

@@ -1,16 +1,12 @@
 import { NextResponse } from "next/server";
 import { oauthUrl } from "@/lib/broker-fyers";
-import { supabase } from "@/lib/supabase";
+import { prisma } from "@/lib/db";
 export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const { appId, secret } = await req.json();
   if (!appId || !secret) return NextResponse.json({ error: "appId and secret required" }, { status: 400 });
-  // Stash pending creds in settings (single-user)
-  await supabase.from("settings").upsert([
-    { key: "fyers_pending_appid", value: appId },
-    { key: "fyers_pending_secret", value: secret },
-  ]);
+  await prisma.setting.upsert({ where: { key: "fyers_pending_appid" }, create: { key: "fyers_pending_appid", value: appId }, update: { value: appId } });
+  await prisma.setting.upsert({ where: { key: "fyers_pending_secret" }, create: { key: "fyers_pending_secret", value: secret }, update: { value: secret } });
   const base = new URL(req.url).origin;
-  const redirect = `${base}/api/broker/fyers/callback`;
-  return NextResponse.json({ loginUrl: oauthUrl(appId, redirect) });
+  return NextResponse.json({ loginUrl: oauthUrl(appId, `${base}/api/broker/fyers/callback`) });
 }

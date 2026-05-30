@@ -1,29 +1,30 @@
 import { NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { prisma } from "@/lib/db";
 export const dynamic = "force-dynamic";
+
 export async function GET() {
-  const { data } = await supabase.from("alerts").select("*").order("created_at", { ascending: false });
-  return NextResponse.json(data ?? []);
+  return NextResponse.json(await prisma.alert.findMany({ orderBy: { createdAt: "desc" } }));
 }
 export async function POST(req: Request) {
-  const body = await req.json();
-  const { data, error } = await supabase.from("alerts").insert({
-    symbol: body.symbol.toUpperCase(), exchange: body.exchange ?? "NSE",
-    condition: body.condition, price: body.price,
-    alert_type: body.alert_type ?? "once", cooldown_mins: body.cooldown_mins ?? 5,
-    remarks: body.remarks ?? "", tag: body.tag ?? "",
-  }).select().single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json(data, { status: 201 });
+  const b = await req.json();
+  const row = await prisma.alert.create({
+    data: {
+      symbol: b.symbol.toUpperCase(), exchange: b.exchange ?? "NSE",
+      condition: b.condition, price: Number(b.price),
+      alertType: b.alert_type ?? "once", cooldownMins: Number(b.cooldown_mins ?? 5),
+      remarks: b.remarks ?? "", tag: b.tag ?? "",
+    },
+  });
+  return NextResponse.json(row, { status: 201 });
 }
 export async function DELETE(req: Request) {
   const { id } = await req.json();
-  await supabase.from("alerts").delete().eq("id", id);
+  await prisma.alert.delete({ where: { id: Number(id) } });
   return NextResponse.json({ message: "Deleted" });
 }
 export async function PATCH(req: Request) {
   const { id } = await req.json();
-  const { data: alert } = await supabase.from("alerts").select("is_active").eq("id", id).single();
-  await supabase.from("alerts").update({ is_active: !alert?.is_active }).eq("id", id);
+  const a = await prisma.alert.findUnique({ where: { id: Number(id) } });
+  await prisma.alert.update({ where: { id: Number(id) }, data: { isActive: !a?.isActive } });
   return NextResponse.json({ message: "Toggled" });
 }

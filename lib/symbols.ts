@@ -2,16 +2,16 @@
  * Symbol master download → Supabase symbols table
  * Sources: NSE equity, NSE F&O, BSE, MCX, AMFI mutual funds
  */
-import { supabase } from "./supabase";
+import { prisma } from "./db";
 
 const NSE_HEADERS = { "User-Agent": "Mozilla/5.0", "Referer": "https://www.nseindia.com/" };
 
 type SymRow = { symbol: string; name: string; exchange: string; type: string; series?: string; isin?: string; token?: string };
 
 async function bulkUpsert(rows: SymRow[]) {
-  // Chunk to avoid payload limits
-  for (let i = 0; i < rows.length; i += 500) {
-    await supabase.from("symbols").upsert(rows.slice(i, i + 500), { onConflict: "symbol,exchange", ignoreDuplicates: true });
+  // createMany with skipDuplicates is fast; uniqueness on (symbol, exchange)
+  for (let i = 0; i < rows.length; i += 1000) {
+    await prisma.symbol.createMany({ data: rows.slice(i, i + 1000), skipDuplicates: true });
   }
 }
 
@@ -97,13 +97,13 @@ export async function downloadAll(exchanges: string[]): Promise<Record<string, n
 
 export async function searchSymbols(query: string, exchange?: string, limit = 20) {
   const q = query.toUpperCase().trim();
-  let qb = supabase.from("symbols").select("symbol,name,exchange,type,isin").ilike("symbol", `${q}%`).limit(limit);
-  if (exchange) qb = qb.eq("exchange", exchange.toUpperCase());
-  const { data } = await qb;
-  return data ?? [];
+  return prisma.symbol.findMany({
+    where: { symbol: { startsWith: q }, ...(exchange ? { exchange: exchange.toUpperCase() } : {}) },
+    select: { symbol: true, name: true, exchange: true, type: true, isin: true },
+    take: limit,
+  });
 }
 
 export async function symbolCount(): Promise<number> {
-  const { count } = await supabase.from("symbols").select("*", { count: "exact", head: true });
-  return count ?? 0;
+  return prisma.symbol.count();
 }
