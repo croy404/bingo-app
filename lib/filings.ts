@@ -59,19 +59,20 @@ export async function fetchBseAnnouncements(): Promise<NewFiling[]> {
     const url = `https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w?pageno=1&strCat=-1&strPrevDate=${yyyymmdd}&strScrip=&strSearch=P&strToDate=${yyyymmdd}&strType=C`;
     const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0", "Referer": "https://www.bseindia.com/" } });
     if (!r.ok) return [];
-    const json = (await r.json()) as { Table?: Array<Record<string, string>> };
+    const json = (await r.json()) as { Table?: Array<Record<string, unknown>> };
     const rows = json.Table ?? [];
+    const s = (x: unknown): string => (x == null ? "" : String(x));
     return rows.slice(0, 60).map((a) => {
-      const symbol = a.SCRIP_CD ?? a.scrip_cd ?? "";
-      const company = a.SLONGNAME ?? a.slongname ?? "";
-      const subject = a.NEWSSUB ?? a.HEADLINE ?? a.News_submission_dt ?? "";
-      const dt = a.News_submission_dt ?? a.NEWS_DT ?? "";
+      const symbol = s(a.SCRIP_CD ?? a.scrip_cd);
+      const company = s(a.SLONGNAME ?? a.slongname);
+      const subject = s(a.NEWSSUB ?? a.HEADLINE ?? a.News_submission_dt);
+      const dt = s(a.News_submission_dt ?? a.NEWS_DT);
       const key = `BSE:${symbol}:${(subject || "").slice(0, 80)}:${dt}`.replace(/\s+/g, " ").trim();
       return {
         exchange: "BSE", symbol, company,
-        category: a.CATEGORYNAME ?? a.Category ?? "",
-        subject, detail: a.MORE ?? "",
-        attachment: a.ATTACHMENTNAME ? `https://www.bseindia.com/xml-data/corpfiling/AttachLive/${a.ATTACHMENTNAME}` : "",
+        category: s(a.CATEGORYNAME ?? a.Category),
+        subject, detail: s(a.MORE),
+        attachment: a.ATTACHMENTNAME ? `https://www.bseindia.com/xml-data/corpfiling/AttachLive/${s(a.ATTACHMENTNAME)}` : "",
         filingTime: dt ? new Date(dt) : undefined, dedupeKey: key,
       };
     }).filter((f) => f.dedupeKey.length > 8);
