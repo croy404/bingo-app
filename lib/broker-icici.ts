@@ -5,9 +5,42 @@
  * - REST LTP + historical (no persistent WebSocket on serverless)
  */
 import crypto from "crypto";
+import https from "https";
 import { prisma } from "./db";
 
 const BREEZE_BASE = "https://api.icicidirect.com/breezeapi/api/v1";
+
+/**
+ * ICICI Breeze uses non-standard GET requests that carry a JSON body
+ * (customerdetails / quotes / historicalcharts). Node's fetch (undici) forbids
+ * a body on GET, so we use the raw https module which permits it.
+ */
+function breezeRequest(method: string, urlStr: string, body: string, headers: Record<string, string>, timeoutMs = 12000): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(urlStr);
+    const req = https.request(
+      {
+        hostname: u.hostname,
+        path: u.pathname + u.search,
+        method,
+        headers: { ...headers, "Content-Length": Buffer.byteLength(body).toString() },
+        timeout: timeoutMs,
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => {
+          try { resolve(JSON.parse(data)); }
+          catch { reject(new Error("Breeze: invalid JSON — " + data.slice(0, 200))); }
+        });
+      }
+    );
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(new Error("Breeze request timeout")); });
+    if (body) req.write(body);
+    req.end();
+  });
+}
 export const SECURITY_MASTER_URL = "https://directlink.icicidirect.com/NewSecurityMaster/SecurityMaster.zip";
 
 export interface BreezeSession {
@@ -61,15 +94,10 @@ function breezeHeaders(apiKey: string, sessionToken: string, apiSecret: string, 
 /** Exchange the apiSessionToken (from ICICI login) for a real session via customerdetails */
 export async function generateSession(apiKey: string, apiSecret: string, apiSessionToken: string): Promise<BreezeSession> {
   const body = JSON.stringify({ SessionToken: apiSessionToken, AppKey: apiKey });
-  // Breeze customerdetails is GET with a JSON body — fetch supports body on GET via duplex
-  const res = await fetch(`${BREEZE_BASE}/customerdetails`, {
-    method: "GET",
-    headers: { "Content-Type": "application/json" },
-    body,
-    // @ts-expect-error - duplex required for GET+body in undici
-    duplex: "half",
-  });
-  const data = await res.json();
+  // Breeze customerdetails is a GET request that carries a JSON body.
+  const data = (await breezeRequest("GET", `${BREEZE_BASE}/customerdetails`, body, { "Content-Type": "application/json" })) as {
+    Success?: { session_token: string; idirect_userid: string; idirect_user_name: string }; Error?: string;
+  };
   if (!data.Success) throw new Error(`Breeze auth error: ${data.Error ?? "Unknown"}`);
   const s = data.Success;
   const session: BreezeSession = {
@@ -121,14 +149,8 @@ export async function breezeLtp(nseSymbol: string, exchange = "NSE"): Promise<Br
     expiry_date: "", right: "others", strike_price: "0",
   });
   try {
-    const res = await fetch(`${BREEZE_BASE}/quotes`, {
-      method: "GET",
-      headers: breezeHeaders(session.apiKey, session.sessionToken, session.apiSecret, body),
-      body,
-      // @ts-expect-error duplex
-      duplex: "half",
-    });
-    const data = await res.json();
+    const data = (await breezeRequest("GET", `${BREEZE_BASE}/quotes`, body,
+      breezeHeaders(session.apiKey, session.sessionToken, session.apiSecret, body))) as { Success?: Record<string, string>[] };
     if (!data.Success?.length) return null;
     const q = data.Success[0];
     const ltp = Number(q.ltp), prev = Number(q.previous_close);
@@ -157,14 +179,8 @@ export async function breezeHistorical(
     expiry_date: "", right: "others", strike_price: "0",
   });
   try {
-    const res = await fetch(`${BREEZE_BASE}/historicalcharts`, {
-      method: "GET",
-      headers: breezeHeaders(session.apiKey, session.sessionToken, session.apiSecret, body),
-      body,
-      // @ts-expect-error duplex
-      duplex: "half",
-    });
-    const data = await res.json();
+    const data = (await breezeRequest("GET", `${BREEZE_BASE}/historicalcharts`, body,
+      breezeHeaders(session.apiKey, session.sessionToken, session.apiSecret, body))) as { Success?: Record<string, string>[] };
     return (data.Success ?? []).map((c: Record<string, string>) => ({
       datetime: c.datetime, open: Number(c.open), high: Number(c.high),
       low: Number(c.low), close: Number(c.close), volume: Number(c.volume) || 0,

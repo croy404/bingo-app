@@ -4,9 +4,9 @@ export const dynamic = "force-dynamic";
 
 function html(body: string): Response {
   return new Response(
-    `<html><body style="background:#0f172a;color:#e2e8f0;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center">
+    `<html><head><meta charset="utf-8"></head><body style="background:#0f172a;color:#e2e8f0;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center">
        <div>${body}</div></body></html>`,
-    { headers: { "Content-Type": "text/html" } }
+    { headers: { "Content-Type": "text/html; charset=utf-8" } }
   );
 }
 
