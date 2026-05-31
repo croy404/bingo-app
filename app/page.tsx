@@ -53,7 +53,7 @@ export default function Home() {
   const [iciciStatus, setIciciStatus] = useState<{ connected: boolean; userName?: string; hasSecret?: boolean } | null>(null);
   const [fyersStatus, setFyersStatus] = useState<{ connected: boolean; uid?: string } | null>(null);
   const [iciKey, setIciKey] = useState(""); const [iciSecret, setIciSecret] = useState(""); const [iciToken, setIciToken] = useState("");
-  const [fyAppId, setFyAppId] = useState(""); const [fySecret, setFySecret] = useState("");
+  const [fyAppId, setFyAppId] = useState(""); const [fySecret, setFySecret] = useState(""); const [fyRedirect, setFyRedirect] = useState("");
   // Symbols state
   const [symStatus, setSymStatus] = useState<{ total: number; byExchange: Record<string, number>; status?: { state?: string } } | null>(null);
   const [symDownloading, setSymDownloading] = useState(false);
@@ -718,12 +718,20 @@ export default function Home() {
                 <button className={btn("bg-red-600 text-white")} onClick={async()=>{await api("/broker/fyers/disconnect",{method:"POST"});refreshBrokers();}}>Disconnect</button>
               ) : (
                 <div className="flex flex-col gap-2">
-                  <p className="text-xs text-slate-500">1. Create an app at myapi.fyers.in (redirect URL = this site + /api/broker/fyers/callback)<br/>2. Enter App ID + Secret → Connect (opens Fyers login popup)</p>
+                  <p className="text-xs text-slate-500">1. Create an app at myapi.fyers.in and register the redirect URI below exactly.<br/>2. Enter App ID + Secret → Connect (opens Fyers login popup)</p>
+                  {fyRedirect && (
+                    <div className="text-xs bg-slate-900 border border-slate-700 rounded p-2 flex items-center gap-2">
+                      <span className="text-slate-400">Redirect URI to register:</span>
+                      <code className="text-green-400 break-all flex-1">{fyRedirect}</code>
+                      <button className={btn("bg-slate-700 text-white")} onClick={()=>navigator.clipboard?.writeText(fyRedirect)}>Copy</button>
+                    </div>
+                  )}
                   <input className={inp} placeholder="App ID (e.g. ABC123-100)" value={fyAppId} onChange={e=>setFyAppId(e.target.value)} />
                   <input className={inp} placeholder="Secret Key" type="password" value={fySecret} onChange={e=>setFySecret(e.target.value)} />
                   <button className={btn("bg-blue-600 text-white")} onClick={async()=>{
                     if(!fyAppId||!fySecret){alert("Fill App ID and Secret");return;}
                     const r=await api("/broker/fyers/prepare",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({appId:fyAppId,secret:fySecret})});
+                    if(r.redirectUri)setFyRedirect(r.redirectUri);
                     if(r.loginUrl){window.open(r.loginUrl,"_blank");setTimeout(refreshBrokers,8000);}else alert("Failed: "+(r.error||"unknown"));
                   }}>Connect via Fyers Login</button>
                 </div>

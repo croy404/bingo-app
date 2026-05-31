@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getLoginUrl } from "@/lib/broker-icici";
+import { appBaseUrl } from "@/lib/app-url";
 import { prisma } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,6 @@ export async function POST(req: Request) {
   if (!apiKey || !apiSecret) return NextResponse.json({ error: "apiKey and apiSecret required" }, { status: 400 });
   await prisma.setting.upsert({ where: { key: "icici_api_key" }, create: { key: "icici_api_key", value: apiKey }, update: { value: apiKey } });
   await prisma.setting.upsert({ where: { key: "icici_secret" }, create: { key: "icici_secret", value: apiSecret }, update: { value: apiSecret } });
-  const base = new URL(req.url).origin;
+  const base = appBaseUrl(req);
   return NextResponse.json({ loginUrl: getLoginUrl(apiKey), callbackUrl: `${base}/api/broker/icici/oauth-callback` });
 }
