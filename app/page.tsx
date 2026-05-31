@@ -50,7 +50,7 @@ export default function Home() {
   const [screenerType, setScreenerType] = useState("gainers");
   const [journalNote, setJournalNote] = useState(""); const [jnDate, setJnDate] = useState(today());
   // Broker state
-  const [iciciStatus, setIciciStatus] = useState<{ connected: boolean; userName?: string } | null>(null);
+  const [iciciStatus, setIciciStatus] = useState<{ connected: boolean; userName?: string; hasSecret?: boolean } | null>(null);
   const [fyersStatus, setFyersStatus] = useState<{ connected: boolean; uid?: string } | null>(null);
   const [iciKey, setIciKey] = useState(""); const [iciSecret, setIciSecret] = useState(""); const [iciToken, setIciToken] = useState("");
   const [fyAppId, setFyAppId] = useState(""); const [fySecret, setFySecret] = useState("");
@@ -80,6 +80,17 @@ export default function Home() {
 
   // Auto-refresh only while the market window is active (08:55–15:45 IST, trading days).
   // Outside it we refresh once, then stop polling — saves API/AI load and shows last close.
+  // When a broker login popup completes, it postMessages back → refresh status.
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      const t = (e.data && (e.data as { type?: string }).type) || "";
+      if (t === "icici_login_complete" || t === "fyers_login_complete") refreshBrokers();
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
@@ -110,7 +121,11 @@ export default function Home() {
     if (t === "news") { const r = await api("/market/news"); setNews(r.items ?? []); }
     if (t === "filings") { const r = await api("/filings"); setFilings(Array.isArray(r) ? r : []); }
     if (t === "sip") { await loadSips(); }
-    if (t === "brokers") { const [ic, fy] = await Promise.all([api("/broker/icici/status"), api("/broker/fyers/status")]); setIciciStatus(ic); setFyersStatus(fy); }
+    if (t === "brokers") {
+      const [ic, fy, saved] = await Promise.all([api("/broker/icici/status"), api("/broker/fyers/status"), api("/broker/icici/saved-key")]);
+      setIciciStatus({ ...ic, hasSecret: saved.hasSecret }); setFyersStatus(fy);
+      if (saved.apiKey) setIciKey(saved.apiKey);
+    }
     if (t === "symbols") { const r = await api("/symbols/status"); setSymStatus(r); }
     if (t === "settings") { const [s, ai] = await Promise.all([api("/settings"), api("/ai/status")]); setSettings(s); setAiStatus(ai); }
   };
@@ -664,22 +679,30 @@ export default function Home() {
                 <button className={btn("bg-red-600 text-white")} onClick={async()=>{await api("/broker/icici/disconnect",{method:"POST"});refreshBrokers();}}>Disconnect</button>
               ) : (
                 <div className="flex flex-col gap-2">
-                  <p className="text-xs text-slate-500">1. Enter API Key + Secret from api.icicidirect.com<br/>2. Click &quot;Open Login&quot; → log in → copy the API_Session token from the redirect URL<br/>3. Paste it below + Connect</p>
-                  <input className={inp} placeholder="API Key" value={iciKey} onChange={e=>setIciKey(e.target.value)} />
-                  <input className={inp} placeholder="API Secret" type="password" value={iciSecret} onChange={e=>setIciSecret(e.target.value)} />
-                  <div className="flex gap-2">
-                    <button className={btn("bg-slate-600 text-white")} onClick={async()=>{
-                      if(!iciKey){alert("Enter API Key first");return;}
-                      const r=await api(`/broker/icici/login-url?apiKey=${encodeURIComponent(iciKey)}`);
-                      if(r.loginUrl) window.open(r.loginUrl,"_blank");
-                    }}>Open Login</button>
+                  <div className="text-xs bg-slate-900 rounded p-2 text-slate-400 mb-1">
+                    <b className="text-amber-400">One-time setup:</b> in your ICICI API app at <span className="text-blue-400">api.icicidirect.com</span>, set the <b>Redirect URL</b> to:<br/>
+                    <code className="text-cyan-400 break-all">http://ggkyez6sftnzxqhq1jku14f2.13.203.185.106.sslip.io/api/broker/icici/oauth-callback</code><br/>
+                    Then the token is captured automatically. (Until then, use manual paste below.)
                   </div>
-                  <input className={inp} placeholder="API_Session token (from redirect URL)" value={iciToken} onChange={e=>setIciToken(e.target.value)} />
-                  <button className={btn("bg-blue-600 text-white")} onClick={async()=>{
-                    if(!iciKey||!iciSecret||!iciToken){alert("Fill all 3 fields");return;}
-                    const r=await api("/broker/icici/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({apiKey:iciKey,apiSecret:iciSecret,sessionToken:iciToken})});
-                    if(r.success){alert("Connected as "+r.userName);refreshBrokers();}else alert("Failed: "+(r.error||"unknown"));
-                  }}>Connect</button>
+                  <input className={inp} placeholder="API Key" value={iciKey} onChange={e=>setIciKey(e.target.value)} />
+                  <input className={inp} placeholder={iciciStatus?.hasSecret ? "API Secret (saved — leave blank to reuse)" : "API Secret"} type="password" value={iciSecret} onChange={e=>setIciSecret(e.target.value)} />
+                  <div className="flex gap-2">
+                    <button className={btn("bg-green-700 text-white")} onClick={async()=>{
+                      if(!iciKey||!iciSecret){alert("Enter API Key + Secret first (saved for next time)");return;}
+                      const r=await api("/broker/icici/prepare-oauth",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({apiKey:iciKey,apiSecret:iciSecret})});
+                      if(r.loginUrl){window.open(r.loginUrl,"_blank");setTimeout(refreshBrokers,6000);} else alert("Failed: "+(r.error||"unknown"));
+                    }}>🔐 Login (auto-capture)</button>
+                  </div>
+                  <details><summary className="text-xs text-slate-500 cursor-pointer">Manual token paste (fallback)</summary>
+                    <div className="flex flex-col gap-2 mt-2">
+                      <input className={inp} placeholder="apisession token (from the redirect URL)" value={iciToken} onChange={e=>setIciToken(e.target.value)} />
+                      <button className={btn("bg-blue-600 text-white")} onClick={async()=>{
+                        if(!iciKey||!iciSecret||!iciToken){alert("Fill key, secret, token");return;}
+                        const r=await api("/broker/icici/connect",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({apiKey:iciKey,apiSecret:iciSecret,sessionToken:iciToken})});
+                        if(r.success){alert("Connected as "+r.userName);refreshBrokers();}else alert("Failed: "+(r.error||"unknown"));
+                      }}>Connect with token</button>
+                    </div>
+                  </details>
                 </div>
               )}
             </div>
