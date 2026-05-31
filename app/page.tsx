@@ -681,7 +681,7 @@ export default function Home() {
                 <div className="flex flex-col gap-2">
                   <div className="text-xs bg-slate-900 rounded p-2 text-slate-400 mb-1">
                     <b className="text-amber-400">One-time setup:</b> in your ICICI API app at <span className="text-blue-400">api.icicidirect.com</span>, set the <b>Redirect URL</b> to:<br/>
-                    <code className="text-cyan-400 break-all">http://ggkyez6sftnzxqhq1jku14f2.13.203.185.106.sslip.io/api/broker/icici/oauth-callback</code><br/>
+                    <code className="text-cyan-400 break-all">{typeof window!=="undefined"?window.location.origin:""}/api/broker/icici/oauth-callback</code><br/>
                     Then the token is captured automatically. (Until then, use manual paste below.)
                   </div>
                   <input className={inp} placeholder="API Key" value={iciKey} onChange={e=>setIciKey(e.target.value)} />
