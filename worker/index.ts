@@ -18,8 +18,10 @@ import { getLtp } from "../lib/ltp";
 import { isMarketHours, isAppActive, istNow, istToday, NSE_HOLIDAYS } from "../lib/market-data";
 import { fetchNseAnnouncements, fetchBseAnnouncements, ingestFilings, watchlistFilter, type NewFiling } from "../lib/filings";
 import { getSession as fyersSession, toFyersSymbol } from "../lib/broker-fyers";
+import { getSession as iciciSession } from "../lib/broker-icici";
 import { startFyersStream, stopFyersStream } from "../lib/fyers-ws";
-import { downloadAll as downloadSymbols } from "../lib/symbols";
+import { startBreezeStream, stopBreezeStream } from "../lib/breeze-ws";
+import { downloadAll as downloadSymbols, getExchangeToken } from "../lib/symbols";
 
 const log = (...a: unknown[]) => console.log(new Date().toISOString(), "[worker]", ...a);
 
@@ -90,7 +92,7 @@ async function checkAlerts() {
 // ─── Broker price streaming → Redis ────────────────────────────────────────────
 async function streamPrices() {
   // Only fetch live prices inside the app-active window (08:55–15:45 IST, trading days).
-  if (!isAppActive()) { stopFyersStream(); return; }
+  if (!isAppActive()) { stopFyersStream(); stopBreezeStream(); return; }
   try {
     const [wl, port] = await Promise.all([
       prisma.watchlist.findMany({ select: { symbol: true, exchange: true } }),
@@ -105,13 +107,32 @@ async function streamPrices() {
     });
     if (!symbols.length) return;
 
-    // If Fyers is connected → real-time WebSocket ticks straight into Redis (sub-second).
+    // 1. ICICI Breeze connected → Socket.IO real-time ticks (token from Shoonya master).
+    const icici = await iciciSession();
+    if (icici) {
+      stopFyersStream();
+      const items: { symbol: string; exchange: string; token: string }[] = [];
+      for (const s of symbols) {
+        const token = await getExchangeToken(s.symbol, s.exchange);
+        if (token) items.push({ symbol: s.symbol, exchange: s.exchange, token });
+      }
+      if (items.length) startBreezeStream(icici, items);
+      // Yahoo-fill any symbols without a token (e.g. F&O) so they're not blank
+      const tokenless = symbols.filter((s) => !items.find((i) => i.symbol === s.symbol && i.exchange === s.exchange));
+      for (const s of tokenless) { const q = await getLtp(s.symbol, s.exchange, { force: true }); if (q.ltp > 0) await cacheSet(`price:${s.exchange}:${s.symbol}`, q, 86400); }
+      return;
+    }
+
+    // 2. Fyers connected → WebSocket ticks.
     const fy = await fyersSession();
     if (fy) {
+      stopBreezeStream();
       startFyersStream(fy, symbols.map((s) => toFyersSymbol(s.exchange, s.symbol)));
       return;
     }
-    // Otherwise (ICICI or Yahoo) → 30s REST polling.
+
+    // 3. No broker → 30s Yahoo REST polling.
+    stopFyersStream(); stopBreezeStream();
     for (const s of symbols) {
       const q = await getLtp(s.symbol, s.exchange, { force: true });
       if (q.ltp > 0) await cacheSet(`price:${s.exchange}:${s.symbol}`, q, 86400);

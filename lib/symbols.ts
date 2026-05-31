@@ -107,3 +107,18 @@ export function toFyersStreamSymbol(exchange: string, tradingSymbol: string): st
 }
 
 export const SHOONYA_EXCHANGES = Object.keys(EXCHANGES);
+
+/**
+ * Resolve the exchange token for a plain symbol (e.g. RELIANCE / NSE).
+ * NSE/BSE equity tokens from Shoonya == the tokens ICICI Breeze livestream uses,
+ * so this drives Breeze WebSocket subscriptions. Tries TRADINGSYMBOL "-EQ" then name.
+ */
+export async function getExchangeToken(symbol: string, exchange: string): Promise<string | null> {
+  const sym = symbol.toUpperCase().trim();
+  const ex = exchange.toUpperCase();
+  const row = await prisma.symbol.findFirst({
+    where: { exchange: ex, OR: [{ symbol: `${sym}-EQ` }, { symbol: sym }, { name: sym, type: "EQ" }] },
+    select: { token: true },
+  });
+  return row?.token || null;
+}
