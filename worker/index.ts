@@ -142,15 +142,27 @@ async function checkFilings() {
 let lastBriefDate = "";
 let lastEodDate = "";
 
+// Persisted "ran today" markers survive restarts (instance stop/start) via settings table.
+async function alreadyRan(key: string, today: string): Promise<boolean> {
+  const row = await prisma.setting.findUnique({ where: { key } });
+  return row?.value === today;
+}
+async function markRan(key: string, today: string) {
+  await prisma.setting.upsert({ where: { key }, create: { key, value: today }, update: { value: today } });
+}
+
 async function runMorningBrief() {
   const ist = istNow();
   const today = istToday();
   if (lastBriefDate === today) return;
   if (ist.getUTCDay() === 0 || ist.getUTCDay() === 6) return;
   if (NSE_HOLIDAYS.has(today.replace(/-/g, ""))) return;
-  // 08:30 IST window
-  if (!(ist.getUTCHours() === 8 && ist.getUTCMinutes() >= 28 && ist.getUTCMinutes() <= 34)) return;
+  const t = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  // Fire any time from 08:25 up to market close — so a boot at 08:40 still triggers it.
+  if (t < 8 * 60 + 25 || t >= 15 * 60 + 30) return;
+  if (await alreadyRan("ran_morning_brief", today)) { lastBriefDate = today; return; }
   lastBriefDate = today;
+  await markRan("ran_morning_brief", today);
   try {
     const fii = await prisma.fiiDiiHistory.findFirst({ orderBy: { date: "desc" } });
     const fiiLine = fii ? `FII ₹${((fii.fiiNet ?? 0) / 100).toFixed(0)}Cr, DII ₹${((fii.diiNet ?? 0) / 100).toFixed(0)}Cr` : "";
@@ -170,9 +182,12 @@ async function runEodPnl() {
   if (lastEodDate === today) return;
   if (ist.getUTCDay() === 0 || ist.getUTCDay() === 6) return;
   if (NSE_HOLIDAYS.has(today.replace(/-/g, ""))) return;
-  // 15:35 IST window
-  if (!(ist.getUTCHours() === 15 && ist.getUTCMinutes() >= 33 && ist.getUTCMinutes() <= 39)) return;
+  const t = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  // Fire any time from 15:35 onward (so it sends before the 16:00 instance stop).
+  if (t < 15 * 60 + 35) return;
+  if (await alreadyRan("ran_eod_pnl", today)) { lastEodDate = today; return; }
   lastEodDate = today;
+  await markRan("ran_eod_pnl", today);
   try {
     const trades = await prisma.intradayTrade.findMany({ where: { tradeDate: new Date(today) } });
     if (!trades.length) return;
