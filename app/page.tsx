@@ -7,7 +7,7 @@ const fmtPct = (n: number | null | undefined) => n == null ? "—" : `${n >= 0 ?
 const cc = (n: number | null | undefined) => !n ? "text-slate-400" : n > 0 ? "text-green-400" : "text-red-400";
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
-type Tab = "dashboard" | "portfolio" | "intraday" | "watchlist" | "options" | "screener" | "journal" | "alerts" | "filings" | "news" | "brokers" | "symbols" | "settings";
+type Tab = "dashboard" | "portfolio" | "sip" | "intraday" | "watchlist" | "options" | "screener" | "journal" | "alerts" | "filings" | "news" | "brokers" | "symbols" | "settings";
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -60,6 +60,14 @@ export default function Home() {
   const [symQuery, setSymQuery] = useState(""); const [symResults, setSymResults] = useState<{ symbol: string; name: string; exchange: string; type: string }[]>([]);
   // Filings
   const [filings, setFilings] = useState<{ id: number; exchange: string; symbol?: string; company?: string; category?: string; subject?: string; attachment?: string; createdAt: string }[]>([]);
+  // SIP
+  const [sips, setSips] = useState<{ id: number; name: string; symbol: string; frequency: string; amount: number }[]>([]);
+  const [sipPerf, setSipPerf] = useState<Record<number, { xirr: number | null; invested: number; units: number; currentValue: number }>>({});
+  const [sipName, setSipName] = useState(""); const [sipSym, setSipSym] = useState("");
+  const [sipFreq, setSipFreq] = useState("monthly"); const [sipAmt, setSipAmt] = useState("");
+  // AI result panels
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiText, setAiText] = useState(""); const [aiTitle, setAiTitle] = useState("");
 
   const loadDashboard = useCallback(async () => {
     const [s, i, n, b, fd] = await Promise.all([
@@ -101,12 +109,36 @@ export default function Home() {
     if (t === "screener") { const [sc, sr] = await Promise.all([api(`/market/screener?type=${screenerType}`), api("/market/sector-rotation")]); setScreener(sc); setSectorRot(sr); }
     if (t === "news") { const r = await api("/market/news"); setNews(r.items ?? []); }
     if (t === "filings") { const r = await api("/filings"); setFilings(Array.isArray(r) ? r : []); }
+    if (t === "sip") { await loadSips(); }
     if (t === "brokers") { const [ic, fy] = await Promise.all([api("/broker/icici/status"), api("/broker/fyers/status")]); setIciciStatus(ic); setFyersStatus(fy); }
     if (t === "symbols") { const r = await api("/symbols/status"); setSymStatus(r); }
     if (t === "settings") { const [s, ai] = await Promise.all([api("/settings"), api("/ai/status")]); setSettings(s); setAiStatus(ai); }
   };
 
   const refreshBrokers = async () => { const [ic, fy] = await Promise.all([api("/broker/icici/status"), api("/broker/fyers/status")]); setIciciStatus(ic); setFyersStatus(fy); };
+
+  const loadSips = async () => {
+    const list = await api("/sip");
+    setSips(Array.isArray(list) ? list : []);
+    const perf: Record<number, { xirr: number | null; invested: number; units: number; currentValue: number }> = {};
+    await Promise.all((Array.isArray(list) ? list : []).map(async (s: { id: number }) => { perf[s.id] = await api(`/sip/${s.id}/performance`); }));
+    setSipPerf(perf);
+  };
+
+  // Generic AI runner — POST (with body) or GET, shows result in a shared panel
+  const runAI = async (title: string, path: string, body?: unknown) => {
+    setAiBusy(true); setAiTitle(title); setAiText("Thinking…");
+    const r = body !== undefined
+      ? await api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      : await api(path);
+    setAiBusy(false);
+    if (r.error) { setAiText("⚠️ " + r.error); return; }
+    const out = r.summary || r.analysis || r.research || r.plan || r.insight ||
+      (r.ideas ? JSON.stringify(r.ideas, null, 2) : "") ||
+      (r.overallScore != null ? `Score ${r.overallScore}/100 — ${r.verdict}\n\nTop risks:\n${(r.topRisks||[]).map((x:string)=>"• "+x).join("\n")}\n\nActions:\n${(r.suggestedActions||[]).map((x:string)=>"• "+x).join("\n")}` : "") ||
+      "No response.";
+    setAiText(out + (r.provider ? `\n\n— via ${r.provider}` : ""));
+  };
 
   const tabCls = (t: Tab) => `cursor-pointer px-3 py-1.5 rounded-md text-sm transition-colors whitespace-nowrap ${tab===t ? "bg-blue-600 text-white" : "text-slate-400 hover:bg-slate-700"}`;
   const inp = "bg-slate-900 border border-slate-600 rounded-md px-3 py-1.5 text-slate-200 text-sm w-full";
@@ -135,7 +167,7 @@ export default function Home() {
 
       {/* Tabs */}
       <div className="flex gap-1 px-6 py-2 border-b border-slate-700 overflow-x-auto bg-slate-900">
-        {(["dashboard","portfolio","intraday","watchlist","options","screener","journal","alerts","filings","news","brokers","symbols","settings"] as Tab[]).map(t => (
+        {(["dashboard","portfolio","sip","intraday","watchlist","options","screener","journal","alerts","filings","news","brokers","symbols","settings"] as Tab[]).map(t => (
           <div key={t} className={tabCls(t)} onClick={() => switchTab(t)}>{t.charAt(0).toUpperCase()+t.slice(1)}</div>
         ))}
       </div>
@@ -145,6 +177,9 @@ export default function Home() {
         {/* ─── DASHBOARD ─── */}
         {tab === "dashboard" && (
           <div>
+            <div className="flex justify-end mb-2">
+              <button className={btn("bg-purple-700 text-white")} disabled={aiBusy} onClick={()=>runAI("AI Market Summary","/ai/market-summary")}>🤖 AI Market Summary</button>
+            </div>
             {/* Indices */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-10 gap-2 mb-4">
               {indices.map(idx => (
@@ -207,6 +242,10 @@ export default function Home() {
         {/* ─── PORTFOLIO ─── */}
         {tab === "portfolio" && (
           <div>
+            <div className="flex gap-2 mb-3 flex-wrap">
+              <button className={btn("bg-purple-700 text-white")} disabled={aiBusy} onClick={()=>runAI("Portfolio Risk Score","/ai/risk-score",{})}>🤖 AI Risk Score</button>
+              <a className={btn("bg-slate-600 text-white")} href="/api/export?type=portfolio">⬇ Export CSV</a>
+            </div>
             {portfolio?.summary && (
               <div className={`${card} mb-4 flex gap-6 flex-wrap`}>
                 {[["Invested","totalInvested"],["Current","totalCurrent"],["P&L","totalPnl"],["Return","totalPnlPercent"]].map(([label, key]) => (
@@ -258,6 +297,44 @@ export default function Home() {
                 </table>
                 {!portfolio?.holdings?.length && <div className="text-center text-slate-500 py-6">No holdings yet</div>}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─── SIP ─── */}
+        {tab === "sip" && (
+          <div>
+            <div className={`${card} mb-4`}>
+              <div className="text-sm font-semibold mb-3">Add SIP</div>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                <input className={inp} placeholder="Name (e.g. Nifty SIP)" value={sipName} onChange={e=>setSipName(e.target.value)} />
+                <input className={inp} placeholder="Symbol / Fund" value={sipSym} onChange={e=>setSipSym(e.target.value.toUpperCase())} />
+                <select className={inp} value={sipFreq} onChange={e=>setSipFreq(e.target.value)}><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="quarterly">Quarterly</option></select>
+                <input className={inp} type="number" placeholder="Amount ₹" value={sipAmt} onChange={e=>setSipAmt(e.target.value)} />
+                <button className={btn("bg-blue-600 text-white")} onClick={async()=>{
+                  if(!sipName||!sipSym||!sipAmt){alert("Fill name, symbol, amount");return;}
+                  await api("/sip",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:sipName,symbol:sipSym,frequency:sipFreq,amount:+sipAmt})});
+                  setSipName("");setSipSym("");setSipAmt("");await loadSips();
+                }}>Add SIP</button>
+              </div>
+            </div>
+            <div className="flex flex-col gap-3">
+              {sips.map(s => { const p = sipPerf[s.id] || {xirr:null,invested:0,units:0,currentValue:0}; return (
+                <div key={s.id} className={card}>
+                  <div className="flex justify-between items-center mb-2">
+                    <div><b>{s.name}</b> <span className="text-xs bg-slate-700 px-2 py-0.5 rounded">{s.symbol}</span> <span className="text-xs bg-blue-900 text-blue-300 px-2 py-0.5 rounded">{s.frequency}</span></div>
+                    <button className="text-red-400 text-sm" onClick={async()=>{if(!confirm("Delete SIP?"))return;await api("/sip",{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:s.id})});await loadSips();}}>Delete</button>
+                  </div>
+                  <div className="flex gap-6 flex-wrap text-sm">
+                    <div><div className="text-xs text-slate-500">Invested</div><b>₹{fmt(p.invested)}</b></div>
+                    <div><div className="text-xs text-slate-500">Units</div><b>{p.units}</b></div>
+                    <div><div className="text-xs text-slate-500">Current</div><b>₹{fmt(p.currentValue)}</b></div>
+                    <div><div className="text-xs text-slate-500">XIRR</div><b className="text-cyan-400">{p.xirr!=null?p.xirr+"%":"—"}</b></div>
+                  </div>
+                  <SipTx sipId={s.id} onAdd={loadSips} api={api} inp={inp} btn={btn} fmt={fmt} />
+                </div>
+              );})}
+              {!sips.length && <div className="text-center text-slate-500 py-10">No SIPs yet. Add one above and log each instalment to track XIRR.</div>}
             </div>
           </div>
         )}
@@ -382,6 +459,9 @@ export default function Home() {
             <div className={`${card} mb-4 flex gap-2 flex-wrap`}>
               <button className={btn(`${screenerType==="gainers"?"bg-green-700":"bg-slate-700"} text-white`)} onClick={async()=>{setScreenerType("gainers");const r=await api("/market/screener?type=gainers");setScreener(r);}}>▲ Gainers</button>
               <button className={btn(`${screenerType==="losers"?"bg-red-700":"bg-slate-700"} text-white`)} onClick={async()=>{setScreenerType("losers");const r=await api("/market/screener?type=losers");setScreener(r);}}>▼ Losers</button>
+              <button className={btn("bg-blue-700 text-white")} onClick={async()=>{const r=await api("/market/52week");setScreener(((r.nearHigh||[]) as Record<string,unknown>[]).map((s)=>({symbol:s.symbol,ltp:s.ltp,change:0,changePercent:s.pChange,volume:0})));setScreenerType("52w high");}}>52W Highs</button>
+              <button className={btn("bg-amber-700 text-white")} onClick={async()=>{const r=await api("/screener/volume-surges?ratio=2");setScreener(((r.rows||[]) as Record<string,unknown>[]).map((s)=>({symbol:s.symbol,ltp:s.ltp,change:0,changePercent:s.changePercent,volume:s.volume})));setScreenerType("volume surge");}}>Volume Surge</button>
+              <button className={btn("bg-purple-700 text-white")} disabled={aiBusy} onClick={()=>runAI("Trade Ideas","/ai/trade-ideas",{topGainers:screener.slice(0,5).map((s:Record<string,unknown>)=>({symbol:s.symbol,changePct:s.changePercent}))})}>🤖 AI Ideas</button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className={card}>
@@ -444,9 +524,11 @@ export default function Home() {
               </div>
             </div>
             <div className={card}>
-              <div className="flex gap-4 mb-3 text-sm">
+              <div className="flex gap-4 mb-3 text-sm items-center">
                 <span>Trades: <b>{journal.length}</b></span>
                 <span className={cc(journal.reduce((s,r)=>s+Number((r as Record<string,unknown>).pnl||0),0))}>P&L: <b>₹{fmt(journal.reduce((s,r)=>s+Number((r as Record<string,unknown>).pnl||0),0))}</b></span>
+                <button className={btn("bg-purple-700 text-white")} disabled={aiBusy} onClick={()=>runAI("Journal Analysis","/ai/journal-analysis",{})}>🤖 AI Analysis</button>
+                <a className={btn("bg-slate-600 text-white")} href="/api/export?type=journal">⬇ Export CSV</a>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs"><thead><tr className="text-slate-500 border-b border-slate-700"><th className="text-left py-1">Date</th><th>Symbol</th><th>Dir</th><th>Qty</th><th>Entry</th><th>Exit</th><th>P&L</th><th>Setup</th><th>Emotion</th><th></th></tr></thead>
@@ -701,11 +783,58 @@ export default function Home() {
                   <span className={p.configured ? "text-green-400 text-xs" : "text-slate-500 text-xs"}>{p.configured ? "✓ Configured" : "Not set"}</span>
                 </div>
               ))}
-              <p className="text-xs text-slate-600 mt-2">Add to Vercel Environment Variables: GROQ_API_KEY, CEREBRAS_API_KEY, OPENROUTER_API_KEY, ANTHROPIC_API_KEY</p>
+              <p className="text-xs text-slate-600 mt-2">Add these in Coolify → app + worker → Environment Variables: GROQ_API_KEY, CEREBRAS_API_KEY, OPENROUTER_API_KEY, ANTHROPIC_API_KEY</p>
             </div>
           </div>
         )}
       </div>
+
+      {/* AI result floating panel */}
+      {aiTitle && (
+        <div className="fixed bottom-4 right-4 w-[min(440px,92vw)] max-h-[60vh] overflow-y-auto bg-slate-800 border border-blue-700 rounded-xl p-4 shadow-2xl z-50">
+          <div className="flex justify-between items-center mb-2">
+            <span className="font-semibold text-blue-300">🤖 {aiTitle}</span>
+            <button className="text-slate-400 hover:text-white" onClick={()=>{setAiTitle("");setAiText("");}}>✕</button>
+          </div>
+          <div className="text-sm text-slate-200 whitespace-pre-wrap leading-relaxed">{aiBusy ? "Thinking…" : aiText}</div>
+        </div>
+      )}
     </div>
+  );
+}
+
+// Inline SIP transaction logger (per-SIP)
+function SipTx({ sipId, onAdd, api, inp, btn, fmt }: {
+  sipId: number; onAdd: () => void; api: (p: string, o?: RequestInit) => Promise<Record<string, unknown>>;
+  inp: string; btn: (c: string) => string; fmt: (n: number | null | undefined) => string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [txs, setTxs] = useState<{ id: number; transaction_date: string; amount: number; units: number; nav: number }[]>([]);
+  const [d, setD] = useState(""); const [a, setA] = useState(""); const [u, setU] = useState(""); const [n, setN] = useState("");
+  const load = async () => { const r = await api(`/sip/${sipId}/transactions`); setTxs(Array.isArray(r) ? (r as unknown as typeof txs) : []); };
+  return (
+    <details className="mt-3" onToggle={(e) => { if ((e.target as HTMLDetailsElement).open) { setOpen(true); load(); } }}>
+      <summary className="cursor-pointer text-slate-400 text-sm">Add instalment / history</summary>
+      {open && (
+        <div className="mt-2">
+          <div className="flex gap-2 flex-wrap mb-2">
+            <input className={`${inp} max-w-[150px]`} type="date" value={d} onChange={e=>setD(e.target.value)} />
+            <input className={`${inp} max-w-[110px]`} type="number" placeholder="Amount" value={a} onChange={e=>setA(e.target.value)} />
+            <input className={`${inp} max-w-[90px]`} type="number" placeholder="Units" value={u} onChange={e=>setU(e.target.value)} />
+            <input className={`${inp} max-w-[100px]`} type="number" placeholder="NAV" value={n} onChange={e=>setN(e.target.value)} />
+            <button className={btn("bg-green-600 text-white")} onClick={async()=>{
+              if(!d||!a||!u||!n)return;
+              await api(`/sip/${sipId}/transactions`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({transaction_date:d,amount:+a,units:+u,nav:+n})});
+              setD("");setA("");setU("");setN("");await load();onAdd();
+            }}>Add</button>
+          </div>
+          {txs.map(t => (
+            <div key={t.id} className="flex justify-between text-xs border-b border-slate-700 py-1">
+              <span>{t.transaction_date}</span><span>₹{fmt(t.amount)}</span><span>{t.units} units</span><span>NAV ₹{fmt(t.nav)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </details>
   );
 }
