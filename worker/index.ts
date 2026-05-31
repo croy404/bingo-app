@@ -17,6 +17,8 @@ import { askAI } from "../lib/ai-provider";
 import { getLtp } from "../lib/ltp";
 import { isMarketHours, isAppActive, istNow, istToday, NSE_HOLIDAYS } from "../lib/market-data";
 import { fetchNseAnnouncements, fetchBseAnnouncements, ingestFilings, watchlistFilter, type NewFiling } from "../lib/filings";
+import { getSession as fyersSession, toFyersSymbol } from "../lib/broker-fyers";
+import { startFyersStream, stopFyersStream } from "../lib/fyers-ws";
 
 const log = (...a: unknown[]) => console.log(new Date().toISOString(), "[worker]", ...a);
 
@@ -87,7 +89,7 @@ async function checkAlerts() {
 // ─── Broker price streaming → Redis ────────────────────────────────────────────
 async function streamPrices() {
   // Only fetch live prices inside the app-active window (08:55–15:45 IST, trading days).
-  if (!isAppActive()) return;
+  if (!isAppActive()) { stopFyersStream(); return; }
   try {
     const [wl, port] = await Promise.all([
       prisma.watchlist.findMany({ select: { symbol: true, exchange: true } }),
@@ -100,11 +102,20 @@ async function streamPrices() {
       seen.add(k);
       return true;
     });
+    if (!symbols.length) return;
+
+    // If Fyers is connected → real-time WebSocket ticks straight into Redis (sub-second).
+    const fy = await fyersSession();
+    if (fy) {
+      startFyersStream(fy, symbols.map((s) => toFyersSymbol(s.exchange, s.symbol)));
+      return;
+    }
+    // Otherwise (ICICI or Yahoo) → 30s REST polling.
     for (const s of symbols) {
       const q = await getLtp(s.symbol, s.exchange, { force: true });
-      if (q.ltp > 0) await cacheSet(`price:${s.exchange}:${s.symbol}`, q, 86400); // keep last close all day
+      if (q.ltp > 0) await cacheSet(`price:${s.exchange}:${s.symbol}`, q, 86400);
     }
-    if (symbols.length) log("streamed", symbols.length, "prices to redis");
+    log("polled", symbols.length, "prices to redis");
   } catch (e) {
     log("price stream error", e);
   }

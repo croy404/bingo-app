@@ -53,6 +53,13 @@ export function toFyersSymbol(exchange: string, symbol: string, series = ""): st
   return `${ex}:${sym}`;
 }
 
+/** Convert a Fyers symbol (e.g. NSE:SBIN-EQ) back to { exchange, symbol }. */
+export function fromFyersSymbol(fyersSymbol: string): { exchange: string; symbol: string } {
+  const [exchange, rest] = fyersSymbol.split(":");
+  const symbol = (rest ?? "").replace(/-(EQ|INDEX|ETF|SM|SGB|GB)$/i, "");
+  return { exchange: exchange ?? "NSE", symbol };
+}
+
 export interface FyersQuote { ltp: number; open: number; high: number; low: number; close: number; volume: number }
 
 export async function fyersGetQuote(fyersSymbol: string): Promise<FyersQuote | null> {

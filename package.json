@@ -21,12 +21,14 @@
     "openai": "^4.78.1",
     "react": "19.0.0",
     "react-chartjs-2": "^5.2.0",
-    "react-dom": "19.0.0"
+    "react-dom": "19.0.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/ws": "^8.5.13",
     "autoprefixer": "^10",
     "eslint": "^9",
     "eslint-config-next": "^16.2.6",
