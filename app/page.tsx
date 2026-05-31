@@ -55,7 +55,7 @@ export default function Home() {
   const [iciKey, setIciKey] = useState(""); const [iciSecret, setIciSecret] = useState(""); const [iciToken, setIciToken] = useState("");
   const [fyAppId, setFyAppId] = useState(""); const [fySecret, setFySecret] = useState("");
   // Symbols state
-  const [symStatus, setSymStatus] = useState<{ total: number; byExchange: Record<string, number> } | null>(null);
+  const [symStatus, setSymStatus] = useState<{ total: number; byExchange: Record<string, number>; status?: { state?: string } } | null>(null);
   const [symDownloading, setSymDownloading] = useState(false);
   const [symQuery, setSymQuery] = useState(""); const [symResults, setSymResults] = useState<{ symbol: string; name: string; exchange: string; type: string }[]>([]);
   // Filings
@@ -743,14 +743,18 @@ export default function Home() {
                 <div className="text-sm font-semibold">📥 Symbol Master</div>
                 <span className="text-xs text-slate-400">Total stored: <b>{symStatus?.total ?? 0}</b></span>
               </div>
-              <p className="text-xs text-slate-500 mb-3">Download scrip masters from NSE (equity), NSE F&O, BSE, MCX (commodities), AMFI (mutual funds). Stored in your Supabase DB for symbol search.</p>
-              <button className={btn("bg-blue-600 text-white")} disabled={symDownloading} onClick={async()=>{
-                setSymDownloading(true);
-                const r=await api("/symbols/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({exchanges:["NSE","NFO","BSE","MCX","MF"]})});
-                setSymDownloading(false);
-                alert("Download complete:\n"+JSON.stringify(r.result,null,2));
-                const st=await api("/symbols/status");setSymStatus(st);
-              }}>{symDownloading ? "Downloading… (takes ~30s)" : "Download All Symbols"}</button>
+              <p className="text-xs text-slate-500 mb-3">Full scrip masters from <b>Shoonya</b> (NSE, BSE, NFO, BFO, MCX, CDS) — complete token + trading-symbol library used to stream LTP per broker. The worker downloads in the background (~30–90s).</p>
+              <div className="flex gap-2 items-center">
+                <button className={btn("bg-blue-600 text-white")} disabled={symDownloading} onClick={async()=>{
+                  setSymDownloading(true);
+                  await api("/symbols/download",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({exchanges:["NSE","BSE","NFO","BFO","MCX","CDS"]})});
+                  // poll status until done
+                  const poll=async(n:number):Promise<void>=>{const st=await api("/symbols/status");setSymStatus(st);const state=(st.status as {state?:string})?.state;if(state==="done"||state==="error"||n>30){setSymDownloading(false);return;}await new Promise(r=>setTimeout(r,4000));return poll(n+1);};
+                  poll(0);
+                }}>{symDownloading ? "Downloading in background…" : "⬇ Download All Symbols (Shoonya)"}</button>
+                <button className={btn("bg-slate-600 text-white")} onClick={async()=>{const st=await api("/symbols/status");setSymStatus(st);}}>Refresh</button>
+                {(symStatus?.status as {state?:string})?.state && <span className="text-xs text-slate-400">state: {(symStatus?.status as {state?:string}).state}</span>}
+              </div>
               {symStatus && (
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-3">
                   {Object.entries(symStatus.byExchange).map(([ex,n]) => (

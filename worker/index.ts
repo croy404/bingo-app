@@ -19,6 +19,7 @@ import { isMarketHours, isAppActive, istNow, istToday, NSE_HOLIDAYS } from "../l
 import { fetchNseAnnouncements, fetchBseAnnouncements, ingestFilings, watchlistFilter, type NewFiling } from "../lib/filings";
 import { getSession as fyersSession, toFyersSymbol } from "../lib/broker-fyers";
 import { startFyersStream, stopFyersStream } from "../lib/fyers-ws";
+import { downloadAll as downloadSymbols } from "../lib/symbols";
 
 const log = (...a: unknown[]) => console.log(new Date().toISOString(), "[worker]", ...a);
 
@@ -118,6 +119,37 @@ async function streamPrices() {
     log("polled", symbols.length, "prices to redis");
   } catch (e) {
     log("price stream error", e);
+  }
+}
+
+// ─── Symbol master download (queued from the UI) ──────────────────────────────
+let symbolDownloadRunning = false;
+async function checkSymbolDownload() {
+  if (symbolDownloadRunning) return;
+  const req = await prisma.setting.findUnique({ where: { key: "symbols_download_req" } });
+  if (!req?.value) return;
+  symbolDownloadRunning = true;
+  let exchanges: string[] = [];
+  try { exchanges = JSON.parse(req.value).exchanges ?? []; } catch { /* ignore */ }
+  // Consume the request immediately so we don't double-run
+  await prisma.setting.deleteMany({ where: { key: "symbols_download_req" } });
+  await prisma.setting.upsert({ where: { key: "symbols_download_status" },
+    create: { key: "symbols_download_status", value: JSON.stringify({ state: "running", exchanges }) },
+    update: { value: JSON.stringify({ state: "running", exchanges }) } });
+  log("symbol download starting:", exchanges.join(","));
+  try {
+    const result = await downloadSymbols(exchanges);
+    await prisma.setting.upsert({ where: { key: "symbols_download_status" },
+      create: { key: "symbols_download_status", value: JSON.stringify({ state: "done", result, at: new Date().toISOString() }) },
+      update: { value: JSON.stringify({ state: "done", result, at: new Date().toISOString() }) } });
+    log("symbol download done:", JSON.stringify(result));
+  } catch (e) {
+    await prisma.setting.upsert({ where: { key: "symbols_download_status" },
+      create: { key: "symbols_download_status", value: JSON.stringify({ state: "error", error: String(e) }) },
+      update: { value: JSON.stringify({ state: "error", error: String(e) }) } });
+    log("symbol download error", e);
+  } finally {
+    symbolDownloadRunning = false;
   }
 }
 
@@ -235,11 +267,14 @@ async function main() {
   // Filings monitor — ALWAYS ON, every 15 min (cheap: one request per exchange).
   // Catches after-hours filings and delivers any overnight backlog automatically.
   setInterval(() => { void checkFilings(); }, 15 * 60_000);
+  // Symbol-master download requests (queued from the UI) — check every 20s.
+  setInterval(() => { void checkSymbolDownload(); }, 20_000);
 
   // Kick off immediately (filings catch-up runs on every (re)start too)
   void checkAlerts();
   void streamPrices();
   void checkFilings();
+  void checkSymbolDownload();
 
   log("worker running — alerts (30s), price stream (30s, gated 08:55–15:45), schedulers (60s), filings (15m, always-on)");
 }
