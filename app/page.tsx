@@ -7,11 +7,11 @@ const fmtPct = (n: number | null | undefined) => n == null ? "—" : `${n >= 0 ?
 const cc = (n: number | null | undefined) => !n ? "text-slate-400" : n > 0 ? "text-green-400" : "text-red-400";
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
-type Tab = "dashboard" | "portfolio" | "intraday" | "watchlist" | "options" | "screener" | "journal" | "alerts" | "news" | "brokers" | "symbols" | "settings";
+type Tab = "dashboard" | "portfolio" | "intraday" | "watchlist" | "options" | "screener" | "journal" | "alerts" | "filings" | "news" | "brokers" | "symbols" | "settings";
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>("dashboard");
-  const [mktStatus, setMktStatus] = useState<{ isOpen: boolean; message: string; dayName: string } | null>(null);
+  const [mktStatus, setMktStatus] = useState<{ isOpen: boolean; message: string; dayName: string; appActive?: boolean; appReason?: string } | null>(null);
   const [indices, setIndices] = useState<{ name: string; exchange: string; ltp: number; changePercent: number }[]>([]);
   const [nifty50, setNifty50] = useState<{ symbol: string; name: string; sector: string; ltp: number; changePercent: number }[]>([]);
   const [fiiDii, setFiiDii] = useState<{ date: string; fiiNetEquity: number; diiNetEquity: number }[]>([]);
@@ -58,6 +58,8 @@ export default function Home() {
   const [symStatus, setSymStatus] = useState<{ total: number; byExchange: Record<string, number> } | null>(null);
   const [symDownloading, setSymDownloading] = useState(false);
   const [symQuery, setSymQuery] = useState(""); const [symResults, setSymResults] = useState<{ symbol: string; name: string; exchange: string; type: string }[]>([]);
+  // Filings
+  const [filings, setFilings] = useState<{ id: number; exchange: string; symbol?: string; company?: string; category?: string; subject?: string; attachment?: string; createdAt: string }[]>([]);
 
   const loadDashboard = useCallback(async () => {
     const [s, i, n, b, fd] = await Promise.all([
@@ -68,7 +70,26 @@ export default function Home() {
     setFiiDii(fd?.data ?? []);
   }, []);
 
-  useEffect(() => { loadDashboard(); const t = setInterval(loadDashboard, 60000); return () => clearInterval(t); }, [loadDashboard]);
+  // Auto-refresh only while the market window is active (08:55–15:45 IST, trading days).
+  // Outside it we refresh once, then stop polling — saves API/AI load and shows last close.
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let cancelled = false;
+    const tick = async () => {
+      const s = await api("/market/status");
+      if (cancelled) return;
+      if (s?.appActive) {
+        await loadDashboard();
+        if (!timer) timer = setInterval(loadDashboard, 60000);
+      } else {
+        await loadDashboard();           // one snapshot (served from cache server-side)
+        if (timer) { clearInterval(timer); timer = null; }
+      }
+    };
+    tick();
+    const guard = setInterval(tick, 5 * 60000); // re-check window every 5 min
+    return () => { cancelled = true; if (timer) clearInterval(timer); clearInterval(guard); };
+  }, [loadDashboard]);
 
   const switchTab = async (t: Tab) => {
     setTab(t);
@@ -79,6 +100,7 @@ export default function Home() {
     if (t === "intraday") { const [tr, sm] = await Promise.all([api(`/intraday?date=${idDate}`), api(`/intraday/summary?date=${idDate}`)]); setIntraday(tr); setIntradaySummary(sm); }
     if (t === "screener") { const [sc, sr] = await Promise.all([api(`/market/screener?type=${screenerType}`), api("/market/sector-rotation")]); setScreener(sc); setSectorRot(sr); }
     if (t === "news") { const r = await api("/market/news"); setNews(r.items ?? []); }
+    if (t === "filings") { const r = await api("/filings"); setFilings(Array.isArray(r) ? r : []); }
     if (t === "brokers") { const [ic, fy] = await Promise.all([api("/broker/icici/status"), api("/broker/fyers/status")]); setIciciStatus(ic); setFyersStatus(fy); }
     if (t === "symbols") { const r = await api("/symbols/status"); setSymStatus(r); }
     if (t === "settings") { const [s, ai] = await Promise.all([api("/settings"), api("/ai/status")]); setSettings(s); setAiStatus(ai); }
@@ -101,12 +123,19 @@ export default function Home() {
             {mktStatus?.isOpen ? "● LIVE" : "● CLOSED"}
           </span>
         </div>
-        <span className="text-xs text-slate-500">{mktStatus?.message} · {mktStatus?.dayName}</span>
+        <div className="flex items-center gap-2">
+          {mktStatus && mktStatus.appActive === false && (
+            <span className="text-xs px-2 py-0.5 rounded bg-amber-900/60 text-amber-300">
+              ⏸ Live updates paused — {mktStatus.appReason === "weekend" ? "weekend" : mktStatus.appReason === "nse_holiday" ? "NSE holiday" : mktStatus.appReason === "pre_open" ? "pre-open" : "after close"} · showing last close
+            </span>
+          )}
+          <span className="text-xs text-slate-500">{mktStatus?.message} · {mktStatus?.dayName}</span>
+        </div>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 px-6 py-2 border-b border-slate-700 overflow-x-auto bg-slate-900">
-        {(["dashboard","portfolio","intraday","watchlist","options","screener","journal","alerts","news","brokers","symbols","settings"] as Tab[]).map(t => (
+        {(["dashboard","portfolio","intraday","watchlist","options","screener","journal","alerts","filings","news","brokers","symbols","settings"] as Tab[]).map(t => (
           <div key={t} className={tabCls(t)} onClick={() => switchTab(t)}>{t.charAt(0).toUpperCase()+t.slice(1)}</div>
         ))}
       </div>
@@ -493,6 +522,31 @@ export default function Home() {
                 ))}</tbody></table>
                 {!alertHistory.length && <div className="text-center text-slate-500 py-4">No history</div>}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─── FILINGS ─── */}
+        {tab === "filings" && (
+          <div>
+            <div className={`${card} mb-3 flex items-center justify-between`}>
+              <div className="text-sm font-semibold">📄 NSE / BSE Corporate Filings</div>
+              <span className="text-xs text-slate-500">Monitored 24/7 · filtered to your watchlist when set</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {filings.map(f => (
+                <div key={f.id} className={card}>
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-xs px-2 py-0.5 rounded bg-slate-700">{f.exchange}{f.symbol ? ` · ${f.symbol}` : ""}</span>
+                    <span className="text-xs text-slate-500">{(f.createdAt || "").slice(0, 16).replace("T", " ")}</span>
+                  </div>
+                  {f.company && <div className="text-sm font-semibold">{f.company}</div>}
+                  <div className="text-sm text-slate-300">{f.subject}</div>
+                  {f.category && <span className="text-xs text-amber-400">{f.category}</span>}
+                  {f.attachment && <a href={f.attachment} target="_blank" rel="noreferrer" className="text-xs text-blue-400 ml-2">🔗 attachment</a>}
+                </div>
+              ))}
+              {!filings.length && <div className="text-center text-slate-500 py-10">No filings yet — the worker polls NSE/BSE every 15 min. New filings appear here and go to Telegram.</div>}
             </div>
           </div>
         )}

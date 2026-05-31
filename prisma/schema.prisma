@@ -177,6 +177,26 @@ model BrokerSession {
   @@map("broker_sessions")
 }
 
+model Filing {
+  id          Int      @id @default(autoincrement())
+  exchange    String   // NSE | BSE
+  symbol      String?
+  company     String?
+  category    String?  // Results, Board Meeting, Dividend, etc.
+  subject     String?
+  detail      String?
+  attachment  String?  // PDF/link if any
+  filingTime  DateTime? @map("filing_time")
+  dedupeKey   String   @unique @map("dedupe_key")
+  notified    Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([exchange])
+  @@index([symbol])
+  @@index([notified])
+  @@map("filings")
+}
+
 model Symbol {
   id        Int      @id @default(autoincrement())
   symbol    String

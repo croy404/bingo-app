@@ -36,14 +36,44 @@ export const NSE_HOLIDAYS = new Set([
   "20260815","20261002","20261225",
 ]);
 
-export function isMarketHours(): boolean {
-  const ist = istNow();
+function dateKey(ist: Date) {
+  return `${ist.getUTCFullYear()}${String(ist.getUTCMonth()+1).padStart(2,"0")}${String(ist.getUTCDate()).padStart(2,"0")}`;
+}
+
+export function isTradingDay(ist: Date = istNow()): boolean {
   const day = ist.getUTCDay();
   if (day === 0 || day === 6) return false;
-  const dk = `${ist.getUTCFullYear()}${String(ist.getUTCMonth()+1).padStart(2,"0")}${String(ist.getUTCDate()).padStart(2,"0")}`;
-  if (NSE_HOLIDAYS.has(dk)) return false;
+  return !NSE_HOLIDAYS.has(dateKey(ist));
+}
+
+// Exchange live session 9:15–15:30 IST (used for alert firing precision)
+export function isMarketHours(): boolean {
+  const ist = istNow();
+  if (!isTradingDay(ist)) return false;
   const t = ist.getUTCHours() * 60 + ist.getUTCMinutes();
-  return t >= 555 && t < 930;
+  return t >= 555 && t < 930; // 9:15 – 15:30
+}
+
+// App + LTP active window 8:55–15:45 IST on trading days.
+// Outside this window the app serves last-known data and makes NO external API calls.
+export const APP_OPEN_MIN = 8 * 60 + 55;   // 08:55
+export const APP_CLOSE_MIN = 15 * 60 + 45; // 15:45
+export function isAppActive(): boolean {
+  const ist = istNow();
+  if (!isTradingDay(ist)) return false;
+  const t = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  return t >= APP_OPEN_MIN && t < APP_CLOSE_MIN;
+}
+
+export function appWindowStatus() {
+  const ist = istNow();
+  const t = ist.getUTCHours() * 60 + ist.getUTCMinutes();
+  const active = isAppActive();
+  let reason = "";
+  if (!isTradingDay(ist)) reason = ist.getUTCDay() === 0 || ist.getUTCDay() === 6 ? "weekend" : "nse_holiday";
+  else if (t < APP_OPEN_MIN) reason = "pre_open";
+  else if (t >= APP_CLOSE_MIN) reason = "post_close";
+  return { active, reason, openMin: APP_OPEN_MIN, closeMin: APP_CLOSE_MIN };
 }
 
 export function marketStatus() {
@@ -61,7 +91,12 @@ export function marketStatus() {
   else if (t < 555) { const d = 555 - t; msg = `Market opens in ${Math.floor(d/60)}h ${d%60}m`; }
   else if (t >= 930) msg = "Market closed for the day";
   else { const d = 930 - t; msg = `Market closes in ${Math.floor(d/60)}h ${d%60}m`; }
-  return { isOpen, message: msg, currentTime: ist.toISOString(), dayName: days[day], isTradingDay: !isWk && !isHol };
+  const win = appWindowStatus();
+  return {
+    isOpen, message: msg, currentTime: ist.toISOString(), dayName: days[day], isTradingDay: !isWk && !isHol,
+    // app-active window (08:55–15:45): when false, UI stops polling and shows last-close data
+    appActive: win.active, appReason: win.reason,
+  };
 }
 
 export const SECTOR_MAP: Record<string, string> = {

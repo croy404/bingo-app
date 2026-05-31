@@ -15,7 +15,8 @@ import { prisma } from "../lib/db";
 import { redis, cacheSet } from "../lib/redis";
 import { askAI } from "../lib/ai-provider";
 import { getLtp } from "../lib/ltp";
-import { isMarketHours, istNow, istToday, NSE_HOLIDAYS } from "../lib/market-data";
+import { isMarketHours, isAppActive, istNow, istToday, NSE_HOLIDAYS } from "../lib/market-data";
+import { fetchNseAnnouncements, fetchBseAnnouncements, ingestFilings, watchlistFilter, type NewFiling } from "../lib/filings";
 
 const log = (...a: unknown[]) => console.log(new Date().toISOString(), "[worker]", ...a);
 
@@ -85,7 +86,8 @@ async function checkAlerts() {
 
 // ─── Broker price streaming → Redis ────────────────────────────────────────────
 async function streamPrices() {
-  if (!isMarketHours()) return;
+  // Only fetch live prices inside the app-active window (08:55–15:45 IST, trading days).
+  if (!isAppActive()) return;
   try {
     const [wl, port] = await Promise.all([
       prisma.watchlist.findMany({ select: { symbol: true, exchange: true } }),
@@ -99,12 +101,40 @@ async function streamPrices() {
       return true;
     });
     for (const s of symbols) {
-      const q = await getLtp(s.symbol, s.exchange);
-      if (q.ltp > 0) await cacheSet(`price:${s.exchange}:${s.symbol}`, q, 60);
+      const q = await getLtp(s.symbol, s.exchange, { force: true });
+      if (q.ltp > 0) await cacheSet(`price:${s.exchange}:${s.symbol}`, q, 86400); // keep last close all day
     }
     if (symbols.length) log("streamed", symbols.length, "prices to redis");
   } catch (e) {
     log("price stream error", e);
+  }
+}
+
+// ─── Filings monitor (NSE/BSE corporate announcements) — ALWAYS ON ─────────────
+// One lightweight HTTP call per exchange. New filings are deduped in the DB and
+// pushed to Telegram. Off-hours filings (e.g. results at 6pm) are caught on the
+// next poll; any backlog from non-working hours is delivered automatically since
+// dedupe is by content, not by time. Filtered to the watchlist when one exists.
+async function checkFilings() {
+  try {
+    const [nse, bse] = await Promise.all([fetchNseAnnouncements(), fetchBseAnnouncements()]);
+    let all: NewFiling[] = [...nse, ...bse];
+    const filter = await watchlistFilter();
+    if (filter) all = all.filter((f) => f.symbol && filter.has(f.symbol.toUpperCase()));
+    const fresh = await ingestFilings(all);
+    if (!fresh.length) return;
+    // Notify (cap to avoid spamming if a big backlog lands at once)
+    for (const f of fresh.slice(0, 15)) {
+      const head = `📄 <b>${f.exchange} Filing</b>${f.symbol ? ` · <b>${f.symbol}</b>` : ""}`;
+      const body = [f.company, f.category, f.subject].filter(Boolean).join("\n");
+      const link = f.attachment ? `\n🔗 ${f.attachment}` : "";
+      await sendTelegram(`${head}\n${body}${link}`);
+    }
+    // Mark notified
+    await prisma.filing.updateMany({ where: { dedupeKey: { in: fresh.map((f) => f.dedupeKey) } }, data: { notified: true } });
+    log("filings: notified", Math.min(fresh.length, 15), "of", fresh.length, "new");
+  } catch (e) {
+    log("filings error", e);
   }
 }
 
@@ -171,17 +201,21 @@ async function main() {
   try { await redis.ping(); log("redis connected"); } catch (e) { log("redis NOT connected", e); }
   try { await prisma.$queryRaw`SELECT 1`; log("postgres connected"); } catch (e) { log("postgres NOT connected", e); }
 
-  // Alert monitor + price streaming every 30s
+  // Alert monitor + price streaming every 30s (self-gate to active window inside)
   setInterval(() => { void checkAlerts(); }, 30_000);
   setInterval(() => { void streamPrices(); }, 30_000);
   // Schedule checks every minute
   setInterval(() => { void runMorningBrief(); void runEodPnl(); }, 60_000);
+  // Filings monitor — ALWAYS ON, every 15 min (cheap: one request per exchange).
+  // Catches after-hours filings and delivers any overnight backlog automatically.
+  setInterval(() => { void checkFilings(); }, 15 * 60_000);
 
-  // Kick off immediately
+  // Kick off immediately (filings catch-up runs on every (re)start too)
   void checkAlerts();
   void streamPrices();
+  void checkFilings();
 
-  log("worker running — alert monitor (30s), price stream (30s), schedulers (60s)");
+  log("worker running — alerts (30s), price stream (30s, gated 08:55–15:45), schedulers (60s), filings (15m, always-on)");
 }
 
 main().catch((e) => { log("fatal", e); process.exit(1); });
