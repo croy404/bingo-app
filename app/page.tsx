@@ -338,6 +338,13 @@ export default function Home() {
     return () => clearInterval(t);
   }, [loadStreamStatus]);
 
+  // watchlist auto-refresh every 30s (prices come from Redis cache via enriched GET)
+  useEffect(() => {
+    if (page !== "watchlist") return;
+    const t = setInterval(loadWatchlist, 30_000);
+    return () => clearInterval(t);
+  }, [page, loadWatchlist]);
+
   // current IST time in status bar
   const [nowIST, setNowIST] = useState("");
   useEffect(() => {
@@ -888,22 +895,34 @@ export default function Home() {
                 <h3 className="text-sm font-semibold mb-2">Active Alerts</h3>
                 <div className="overflow-x-auto">
                   <table className="w-full"><thead><tr className="border-b border-[#334155]">
-                    <th className={th}>Symbol</th><th className={th}>Condition</th><th className={`${th} text-right`}>Target</th><th className={th}>Type</th><th className={`${th} text-right`}>Hits</th><th className={th}>Status</th><th className={th}></th>
+                    <th className={th}>Symbol</th><th className={th}>Condition</th><th className={`${th} text-right`}>Target</th><th className={`${th} text-right`}>LTP</th><th className={`${th} text-right`}>Distance</th><th className={th}>Type</th><th className={`${th} text-right`}>Hits</th><th className={th}></th>
                   </tr></thead>
-                  <tbody>{alerts.filter((a:Record<string,unknown>)=>a.is_active).map((a:Record<string,unknown>)=>(
-                    <tr key={String(a.id)} className="hover:bg-white/[0.02]">
+                  <tbody>{alerts.filter((a:Record<string,unknown>)=>a.is_active).map((a:Record<string,unknown>)=>{
+                    const ltp = a.ltp != null ? Number(a.ltp) : null;
+                    const target = Number(a.price);
+                    const distPct = ltp ? ((ltp - target) / target * 100) : null;
+                    const isCross = distPct != null && (
+                      (String(a.condition).startsWith(">") && ltp! >= target) ||
+                      (String(a.condition).startsWith("<") && ltp! <= target)
+                    );
+                    return (
+                    <tr key={String(a.id)} className={`hover:bg-white/[0.02] ${isCross?"bg-green-950/40":""}`}>
                       <td className={`${td} font-semibold`}>{String(a.symbol)}<br/><span className="text-[10px] text-slate-500">{String(a.exchange)}</span></td>
-                      <td className={`${td} text-center font-mono`}>{String(a.condition)}</td>
-                      <td className={`${td} text-right tabular-nums`}>₹{fmt(Number(a.price))}</td>
+                      <td className={`${td} text-center font-mono text-amber-400`}>{String(a.condition)}</td>
+                      <td className={`${td} text-right tabular-nums`}>₹{fmt(target)}</td>
+                      <td className={`${td} text-right tabular-nums ${ltp?cc(Number(a.changePercent)):"text-slate-500"}`}>{ltp?`₹${fmt(ltp)}`:"—"}</td>
+                      <td className={`${td} text-right tabular-nums text-xs ${isCross?"text-green-400 font-semibold":distPct!=null?cc(-Math.abs(distPct)):""}`}>
+                        {distPct!=null?`${distPct>=0?"+":""}${distPct.toFixed(2)}%`:"—"}
+                      </td>
                       <td className={`${td} text-xs`}>{String(a.alert_type)}</td>
                       <td className={`${td} text-right`}>{String(a.triggered_count||0)}</td>
-                      <td className={td}><span className="text-xs px-1.5 py-0.5 rounded bg-green-900/50 text-green-400">Active</span></td>
                       <td className={`${td} flex gap-1`}>
                         <button className="text-xs text-slate-400 hover:text-white px-2 py-0.5 rounded bg-[#334155]" onClick={async()=>{await api("/alerts",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:a.id})});const r=await api("/alerts");setAlerts(Array.isArray(r)?r:[]);}}>Pause</button>
                         <button className="text-xs text-red-400 hover:text-red-300 px-2" onClick={async()=>{await api("/alerts",{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:a.id})});const r=await api("/alerts");setAlerts(Array.isArray(r)?r:[]);}}>✕</button>
                       </td>
                     </tr>
-                  ))}</tbody></table>
+                    );
+                  })}</tbody></table>
                   {!alerts.filter((a:Record<string,unknown>)=>a.is_active).length && <p className="text-center text-slate-500 py-4">No active alerts</p>}
                 </div>
               </div>
@@ -1139,7 +1158,16 @@ export default function Home() {
               )}
               <div className={card}>
                 <h3 className="text-sm font-semibold mb-3">Symbol Search</h3>
-                <SymbolCombobox value={symQuery} onChange={v=>{setSymQuery(v);}} onSelect={(s,ex)=>{setSymQuery(`${s} (${ex})`);}} placeholder="Search any symbol or company name…"/>
+                <div className="flex gap-2 mb-3">
+                  <input className={`${inp} flex-1`} placeholder="Search any symbol or company name…"
+                    value={symQuery} onChange={e=>setSymQuery(e.target.value)}
+                    onKeyDown={async e=>{if(e.key==="Enter"&&symQuery.trim()){const r=await api(`/symbols/search?q=${encodeURIComponent(symQuery)}&limit=20`);setSymResults(Array.isArray(r)?r:[]);}}}/>
+                  <button className={btn("bg-blue-600 text-white")} onClick={async()=>{
+                    if(!symQuery.trim())return;
+                    const r=await api(`/symbols/search?q=${encodeURIComponent(symQuery)}&limit=20`);
+                    setSymResults(Array.isArray(r)?r:[]);
+                  }}>Search</button>
+                </div>
                 {symResults.length>0 && (
                   <div className="mt-3 overflow-x-auto">
                     <table className="w-full"><thead><tr className="border-b border-[#334155]">

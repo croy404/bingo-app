@@ -12,7 +12,7 @@
  * This is the piece serverless/Vercel could NOT do (no persistent process).
  */
 import { prisma } from "../lib/db";
-import { redis, cacheSet } from "../lib/redis";
+import { redis, cacheGet, cacheSet } from "../lib/redis";
 import { askAI } from "../lib/ai-provider";
 import { getLtp } from "../lib/ltp";
 import { isMarketHours, isAppActive, istNow, istToday, NSE_HOLIDAYS } from "../lib/market-data";
@@ -62,8 +62,19 @@ async function checkAlerts() {
     const alerts = await prisma.alert.findMany({ where: { isActive: true }, take: 500 });
     for (const alert of alerts) {
       try {
-        const q = await getLtp(alert.symbol, alert.exchange);
-        const ltp = q.ltp;
+        // Read from Redis price cache first (set by WS stream / 30s poller).
+        // Fall back to live getLtp only when cache is cold (key missing).
+        const cached = await cacheGet<{ ltp: number; source: string }>(`price:${alert.exchange}:${alert.symbol}`);
+        let ltp: number;
+        let priceSource: string;
+        if (cached?.ltp) {
+          ltp = cached.ltp;
+          priceSource = cached.source + "_cached";
+        } else {
+          const q = await getLtp(alert.symbol, alert.exchange, { force: true });
+          ltp = q.ltp;
+          priceSource = q.source;
+        }
         if (!ltp) continue;
         const c = alert.condition, p = alert.price;
         const triggered = (c === ">" && ltp > p) || (c === ">=" && ltp >= p) || (c === "<" && ltp < p) || (c === "<=" && ltp <= p);
@@ -76,7 +87,7 @@ async function checkAlerts() {
           data: { triggeredCount: alert.triggeredCount + 1, lastTriggeredAt: new Date(), ...(alert.alertType === "once" ? { isActive: false } : {}) },
         });
         const dir = c === ">" || c === ">=" ? "crossed above" : "dropped below";
-        const msg = `⚡ <b>Alert Triggered!</b>\n📊 <b>${alert.symbol}</b> · ${alert.exchange}\n💵 LTP: ₹${ltp.toFixed(2)} ${dir} ₹${p}\n📡 ${q.source}\n🕐 ${istNow().toISOString().slice(11, 16)} IST`;
+        const msg = `⚡ <b>Alert Triggered!</b>\n📊 <b>${alert.symbol}</b> · ${alert.exchange}\n💵 LTP: ₹${ltp.toFixed(2)} ${dir} ₹${p}\n📡 ${priceSource}\n🕐 ${istNow().toISOString().slice(11, 16)} IST`;
         await sendTelegram(msg);
         await sendWhatsApp(`BINGO Alert: ${alert.symbol} ${c} ${p} | LTP ${ltp.toFixed(2)}`);
         log("alert fired", alert.symbol, c, p, "ltp", ltp);

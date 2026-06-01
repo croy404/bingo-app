@@ -1,9 +1,30 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { cacheGet } from "@/lib/redis";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json(await prisma.alert.findMany({ orderBy: { createdAt: "desc" } }));
+  const rows = await prisma.alert.findMany({ orderBy: { createdAt: "desc" } });
+  const enriched = await Promise.all(
+    rows.map(async (r) => {
+      const cached = await cacheGet<{ ltp: number; changePercent: number }>(
+        `price:${r.exchange}:${r.symbol}`
+      );
+      return {
+        id: r.id, symbol: r.symbol, exchange: r.exchange,
+        condition: r.condition, price: r.price,
+        alert_type: r.alertType, cooldown_mins: r.cooldownMins,
+        remarks: r.remarks, tag: r.tag,
+        is_active: r.isActive,
+        triggered_count: r.triggeredCount,
+        last_triggered_at: r.lastTriggeredAt,
+        created_at: r.createdAt,
+        ltp: cached?.ltp ?? null,
+        changePercent: cached?.changePercent ?? null,
+      };
+    })
+  );
+  return NextResponse.json(enriched);
 }
 export async function POST(req: Request) {
   const b = await req.json();
