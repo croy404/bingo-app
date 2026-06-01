@@ -1,25 +1,40 @@
-# RESUME PROMPT — paste this into a fresh Sonnet session
+# RESUME PROMPT — paste this at the start of every new chat session
 
-You are continuing work on **BINGO**, a production Indian stock-market dashboard. The previous session (Opus) handed off here. Do this first, before anything else:
+You are continuing work on **BINGO**, a production Indian stock-market dashboard.
 
-1. Read these three files in full, in order:
-   - `CLAUDE.md` (project guide: architecture, deploy workflow, gotchas)
-   - `SESSION_HANDOFF.md` (detailed state, outstanding items, next 10 tasks)
-   - Your local auto-memory file `bingo-deployment.md` (has the secrets: DB/Redis URLs, Coolify API token, SSH key path — these are NOT in the repo)
-2. Confirm you've read them by giving me a 5-line summary of: the stack, how deploys work, what's done, what's outstanding, and the very next task.
+## Do this first (before anything else)
+1. Read `CLAUDE.md` — architecture, deploy workflow, Dockerfile gotchas
+2. Read `SESSION_HANDOFF.md` — detailed state, what's done, outstanding bugs, next 10 tasks
+3. Read `CURRENT_TASK.md` — the specific task to work on right now
+4. Read local auto-memory `bingo-deployment.md` — secrets (DB/Redis URLs, Coolify token)
 
-## Ground rules (do not violate)
-- **Stack is fixed:** GitHub → Coolify → AWS EC2 (Mumbai). Next.js 16 + TypeScript + Postgres + Redis + Docker + Coolify worker. **NO Vercel, NO Supabase, NO serverless.**
-- **Deploy = `git push` then trigger BOTH app + worker via the Coolify API** (token in auto-memory). Do NOT rely on the GitHub webhook — it's unreliable here. Poll deployment status to `finished`.
-- **Secrets never go in the repo** (`croy404/bingo-app` is public). They live only in local auto-memory.
-- Before every commit: `npm test` and `npm run build` (use a dummy `DATABASE_URL` env for build). Then commit, push, deploy.
-- The EC2 box auto-stops outside weekday 08:35–16:00 IST. If a deploy/SSH fails off-hours, ask me to start the instance from the EC2 console.
-- NSE blocks the datacenter IP for some direct routes — prefer Yahoo or broker data; don't treat those 403/HTML responses as bugs.
+Then confirm with a 5-line summary:
+- Stack / URLs
+- How deploys work
+- What was last done (last commit)
+- What's broken / outstanding
+- What you'll work on now
 
-## Where to start
-Unless I say otherwise, start with the top of the "Next 10 tasks" list in `SESSION_HANDOFF.md`:
-1. Help me finish **Fyers login** (redirect URI at myapi.fyers.in must be exactly `https://maxcap.co.in/api/broker/fyers/callback`, saved, and I must open the app via maxcap.co.in).
-2. Then verify **live broker streaming** during market hours.
-3. Then add **GROQ_API_KEY** to Coolify for AI features.
+## Ground rules (never violate)
+- Stack is fixed: GitHub → Coolify → EC2 (Mumbai). Next.js 16 + Postgres + Redis + Docker. NO Vercel, NO Supabase.
+- Deploy = `git push` then trigger BOTH app + worker via Coolify API (token in auto-memory). Poll to `finished`.
+- Secrets never in repo. Only in Coolify env vars and local auto-memory.
+- `npm test && npm run build` (with dummy DATABASE_URL) before every commit.
+- EC2 sleeps 16:00–08:35 IST weekdays. Off-hours deploy? Ask user to start from EC2 console.
+- NSE blocks datacenter IP — normal, not a bug. Yahoo/broker data as fallback.
 
-Ask me which one to tackle first, or proceed top-down if I tell you to "just continue."
+## Context window hygiene
+- Do ONE task per session. Finish it, test it, deploy it.
+- At end of every session: update SESSION_HANDOFF.md + CURRENT_TASK.md with new state.
+- Keep messages short and specific. Don't re-read files you already read this session.
+- If context is getting heavy: commit what's done, update handoff docs, tell user to start fresh session.
+
+## Current priority order (from SESSION_HANDOFF.md)
+1. Fix alert LTP (worker reads Redis cache, not stale getLtp)
+2. Enrich watchlist GET with Redis LTP prices
+3. Fix Symbols tab search wiring
+4. Verify/add intraday summary route
+5. Fyers login (user must register redirect URI at myapi.fyers.in first)
+6. Redis-first LTP in alert monitor
+7. NSE-blocked routes → broker data fallback
+8. Export CSV format matching old app

@@ -1,92 +1,133 @@
 # SESSION HANDOFF — BINGO App
-
-Detailed state for the next session. Read `CLAUDE.md` first for the quick guide.
-**Last updated:** 2026-05-31, end of a long build session. Everything below is the TRUE current state (the project is in a good, working condition — there is NO active blocking bug).
+**Last updated:** 2026-06-01 (end of session 2). App is deployed and healthy.
+Read `CLAUDE.md` first for quick guide. Secrets in local auto-memory `bingo-deployment.md`.
 
 ---
 
-## 1. Current project architecture
-- **GitHub → Coolify → AWS EC2 (Mumbai, ap-south-1)**, single t3.medium box, Elastic IP `13.203.185.106`.
-- Two Coolify resources from one repo (`croy404/bingo-app`, branch `main`):
-  - **Web app** — `/Dockerfile`, Next.js 16 standalone, port 3000, domain `https://maxcap.co.in`. UUID `ggkyez6sftnzxqhq1jku14f2`.
-  - **Worker** — `/Dockerfile.worker`, runs `worker/index.ts` via tsx, no domain (shows red/unhealthy in Coolify — cosmetic, it has no web port). UUID `jqmmwoqn4qcemc9nawzadd1r`.
-- **Postgres 16** + **Redis 7** are separate Coolify database resources on the same box.
-- Stack: Next.js 16, TypeScript, Prisma, ioredis, Docker, fflate, socket.io-client, ws, openai.
+## 1. Stack (do not change)
+- GitHub (`croy404/bingo-app`, branch `main`) → Coolify → AWS EC2 t3.medium ap-south-1
+- **App** `/Dockerfile` Next.js 16 standalone, port 3000, `https://maxcap.co.in` — UUID `ggkyez6sftnzxqhq1jku14f2`
+- **Worker** `/Dockerfile.worker` tsx, no port — UUID `jqmmwoqn4qcemc9nawzadd1r`
+- Postgres 16 + Redis 7 as Coolify resources on same box
+- Deploy: `git push` then POST to Coolify API (token in auto-memory). **Never wait on GitHub webhook.**
 
-## 2. What has been completed (everything from the original Replit app is ported)
-- Dashboard: indices (Yahoo, incl. global), Nifty50 heatmap, FII/DII, market breadth, news (RSS)
-- Portfolio: holdings CRUD, live P&L, per-holding + portfolio XIRR, sector allocation, **benchmark vs Nifty**, **daily snapshots**
-- **SIP tracker**: entries + instalment transactions + XIRR performance (own tab)
-- Intraday trade log with FIFO P&L + equity curve
-- Journal + daily notes + emotion/setup tagging
-- Alerts: create/toggle/delete, history, **backtest**, cooldowns, recurring
-- Options chain + PCR
-- Screener: gainers/losers, **52-week high/low**, **volume surge**, sector rotation
-- **Symbol master: 148k symbols from Shoonya** (NSE/BSE/NFO/BFO/MCX/CDS) + search
-- **CSV export** (portfolio/journal/intraday/alerts)
-- **AI: 4-provider fallback** (Groq→Cerebras→OpenRouter→Anthropic) + UI buttons (market summary, risk score, journal analysis, trade ideas) + Telegram AI commands
-- **Telegram bot**: full command set (/status /alerts /portfolio /ltp /brief /research /risk /ideas /week /bracket etc.) + webhook
-- **NSE/BSE filings monitor** (always-on, 15 min, dedupe, Telegram push) + Filings tab
-- Morning brief (08:30 IST) + EOD P&L (15:35 IST), restart-robust
-- **Broker login: ICICI Breeze + Fyers** (OAuth auto-capture + manual token; creds saved)
-- **Broker real-time WebSocket streaming: ICICI Breeze (Socket.IO) + Fyers (HSM WS)** → Redis
-- HTTPS custom domain (maxcap.co.in) + Let's Encrypt
-- Cost optimization: scheduled stop/start (~$14/mo)
+---
 
-## 3. Files / structure
-- `app/page.tsx` — entire single-page UI (tabs: dashboard, portfolio, sip, intraday, watchlist, options, screener, journal, alerts, filings, news, brokers, symbols, settings) + inline `SipTx` component + AI result panel
-- `app/api/**/route.ts` — ~55 routes (market, portfolio, sip, intraday, journal, alerts, options, screener, symbols, ai, broker/{icici,fyers}, telegram, cron, filings, export, health, dashboard, settings, watchlist)
-- `lib/` — `db.ts`, `redis.ts`, `market-data.ts` (gating, xirr, sectors), `ltp.ts` (unified resolver), `ai-provider.ts`, `broker-icici.ts` (uses node:https for GET+body), `broker-fyers.ts`, `breeze-ws.ts`, `fyers-ws.ts`, `symbols.ts` (Shoonya), `filings.ts`
-- `worker/index.ts` — alert monitor (30s), price stream/WS (30s, gated), schedulers (60s), filings (15m), symbol-download flag (20s)
-- `prisma/schema.prisma` — 15 models incl. `Filing`, `Symbol`, `BrokerSession`, `Setting`
-- `Dockerfile`, `Dockerfile.worker`, `docker-compose.yml` (local dev), `tests/market-data.test.ts`, `.github/workflows/ci.yml`
+## 2. What IS working (verified 2026-06-01)
+- `/api/health` → postgres + redis connected ✅
+- `/api/ai/status` → Groq ✅ Cerebras ✅ OpenRouter ✅ (Anthropic not set — not needed)
+- UI: full sidebar layout matching Replit Bingo V3.2 ✅
+- SymbolCombobox autocomplete wired everywhere ✅
+- Fyers OAuth redirect: `auth_code` param fix ✅, `APP_URL` env pinned ✅
+- ICICI Breeze WS: correct `sessionToken` in Socket.IO auth ✅
+- Symbol search: name/contains OR, `baseSymbol` strips `-EQ` ✅
+- All AI routes exist and API keys set in Coolify ✅
+- Morning brief, EOD P&L, filings monitor in worker ✅
+- `/api/broker/stream-status` endpoint ✅
 
-## 4. Current deployment setup
-- Deploy via **Coolify API** (NOT GitHub webhook — see CLAUDE.md). Token in local auto-memory.
-- Coolify localhost server IP = `host.docker.internal` (critical — see CLAUDE.md).
-- Env vars set in Coolify on both resources: DATABASE_URL, REDIS_URL, CRON_SECRET, NODE_ENV. AI keys NOT yet set.
-- Stop/start: cron stop 16:00 IST + EventBridge start 08:35 IST. Box is OFF outside weekday 08:35–16:00 IST → deploys need the box awake (start it from EC2 console for off-hours work).
+---
 
-## 5. Outstanding issues (none blocking; mostly user-side config)
-- **Fyers login** still returns `redirectUrl mismatch`. Fix is user-side: at myapi.fyers.in set Redirect URI to exactly `https://maxcap.co.in/api/broker/fyers/callback`, **Save**, and open the app via `https://maxcap.co.in` (not the sslip.io URL) so the generated redirect matches.
-- **ICICI** logs in fine; live streaming only verifiable during market hours (08:55–15:45 IST) with symbols in watchlist/portfolio.
-- **NSE-direct routes** (`market/nifty50`, `market/breadth`, `market/screener`, `market/52week`, `market/sector-rotation`, `options`) are blocked by NSE from the datacenter IP (HTML block page). They work once a broker is connected (broker data) — or during market hours. Yahoo-backed routes (indices, quotes, fii-dii, news) always work.
-- AI buttons need a `GROQ_API_KEY` (free) added to Coolify env vars.
+## 3. Outstanding issues (things to fix next)
 
-## 6. Current bug being investigated
-**None.** Last items were all resolved: webhook→Coolify-API deploys, server-IP SSH timeout (fixed to host.docker.internal), ICICI GET-with-body (fixed via node:https), domain+HTTPS, symbol master, both broker WebSockets. The app is healthy (`/api/health` → postgres+redis connected).
+### HIGH PRIORITY (functional bugs)
+1. **LTP fetch on Alerts tab is broken** — alert monitor calls `getLtp()` but ICICI `breezeLtp` uses
+   `resolveSymbol()` which looks up ICICI Security Master (exchange=`ICICI` in symbols table) — that
+   table is likely empty (Security Master never downloaded). Fallback chain: ICICI → Fyers → Yahoo.
+   Yahoo fallback should work but needs `isAppActive()` to return true (market hours only).
+   **Fix:** Make alert LTP check use Yahoo as guaranteed fallback outside market hours too,
+   OR allow `force:true` in alert monitor getLtp calls. File: `worker/index.ts` line ~65 (`getLtp`
+   call) and `lib/ltp.ts`.
 
-## 7. Next 10 tasks in priority order
-1. Help the user finish **Fyers login** (verify redirect URI saved + app opened via maxcap.co.in) and confirm a successful connect.
-2. During market hours, **verify live streaming** flows: connect ICICI or Fyers, add a watchlist symbol, confirm `price:NSE:<SYM>` updates in Redis and the UI shows live ticks.
-3. Add **GROQ_API_KEY** to Coolify (guide user) and confirm AI buttons return results.
-4. Add **BFO** to the symbol download and confirm counts.
-5. Make NSE-direct routes fall back to broker data when a broker is connected (so heatmap/breadth/screener populate even from the datacenter IP).
-6. Add a tiny **/api/stream/status** + UI badge showing which broker WS is live and tick freshness.
-7. Persist **Fyers app credentials** (like ICICI) so re-login only needs the token.
-8. Add **alert sound / browser push** on trigger (optional).
-9. Consider re-enabling **GitHub webhook auto-deploy** properly (fix the webhook secret on bingo-app1) so the Coolify-API workaround isn't needed — low priority.
-10. General polish: loading states, error toasts, mobile layout pass.
+2. **Fyers login still needs user portal action** — user must go to myapi.fyers.in, set redirect URI
+   to `https://maxcap.co.in/api/broker/fyers/callback`, Save, then try login from the app.
 
-## 8. Environment variables required
-In Coolify, both app + worker: `DATABASE_URL`, `REDIS_URL`, `CRON_SECRET=bingo_cron_secret_2026`, `NODE_ENV=production`.
-Optional AI: `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`.
-(Actual DB/Redis connection strings + Coolify API token are in the LOCAL auto-memory file, not this repo.)
+3. **ICICI streaming only verifiable during market hours** (08:55–15:45 IST) — needs symbols in
+   watchlist + portfolio for the worker to subscribe to. Token lookup uses Shoonya NSE master.
 
-## 9. AWS / Coolify configuration already done
-- EC2 t3.medium ap-south-1, Elastic IP 13.203.185.106, 30GB disk, 4GB swap.
-- Security group: SSH(22)=home IP, HTTP(80)+HTTPS(443)+8000=0.0.0.0/0.
-- Coolify installed; GitHub App `bingo-app1` connected (clones fine; webhook unreliable).
-- Postgres 16 + Redis 7 running as Coolify resources.
-- App + worker resources created and deploying.
-- DNS: maxcap.co.in A `@` → 13.203.185.106; HTTPS via Let's Encrypt.
-- Cron stop 16:00 IST (`/etc/cron.d/bingo-stop`); EventBridge `bingo-start` 08:35 IST (role `bingo-scheduler-ec2-start`); shutdown behavior = Stop.
-- ICICI portal redirect already `https://maxcap.co.in/api/broker/icici/oauth-callback`.
+4. **NSE-direct routes blocked from datacenter** — `/market/nifty50`, `/market/breadth`,
+   `/market/screener`, `/options` get HTML block page from NSE. These work when a broker is connected.
 
-## 10. Instructions for the next Claude (Sonnet) session
-- Read `CLAUDE.md` + this file fully before changing anything. The local auto-memory file also has secrets + the same context.
-- To deploy: `git push` then trigger BOTH app + worker via the Coolify API (CLAUDE.md), poll status to `finished`. Don't wait on the GitHub webhook.
-- Always `npm test && npm run build` (with a dummy DATABASE_URL) before committing.
-- The box may be asleep outside weekday 08:35–16:00 IST — if SSH/deploy fails, ask the user to start the instance from the EC2 console.
-- For live-data work, NSE blocks the datacenter IP; prefer Yahoo or broker data.
-- Be careful editing the two Dockerfiles — see the "gotchas" in CLAUDE.md (several hard-won fixes).
+### MEDIUM PRIORITY
+5. **Alert LTP uses REST not Redis** — worker alert check calls `getLtp()` which hits ICICI/Yahoo REST
+   every 30s per symbol. Once WS streaming works, alert monitor should read from Redis
+   (`price:EXCHANGE:SYMBOL`) directly instead of making REST calls. Much faster + no rate limits.
+
+6. **Watchlist tab doesn't show live LTP** — `/api/watchlist` route returns DB rows only (symbol,
+   exchange). It doesn't join with Redis price cache. Need to enrich with cached prices.
+   File: `app/api/watchlist/route.ts`
+
+7. **Symbol search in Symbols tab doesn't update `symResults`** — the `SymbolCombobox` in Symbols
+   page calls `onSelect` but the `symResults` state is only set by the old manual search. The
+   `SymbolCombobox` itself shows its own internal dropdown; the table below it never updates.
+   Fix: Wire the `/api/symbols/search` results to the `symResults` state in the Symbols tab.
+
+8. **Intraday summary API** — route `/api/intraday/summary` may not exist. Check:
+   `find app/api/intraday -type f`. If missing, add it.
+
+9. **Export CSV format** — user wants CSV to match old Replit app format exactly. Need to check
+   the old app's export fields and match them in `/api/export/route.ts`.
+
+### LOW PRIORITY
+10. **ICICI Security Master** — `resolveSymbol()` in `broker-icici.ts` checks `symbols` table with
+    `exchange=ICICI`. This table is likely empty (Security Master never downloaded). The static
+    `SYMBOL_OVERRIDES` map covers Nifty50 stocks. For other stocks, fallback is the raw symbol
+    which may not match ICICI's stock code. Add a Security Master download route or use Shoonya
+    tokens directly (already done for WS streaming).
+
+11. **GitHub webhook auto-deploy** — still broken (secret mismatch). Low priority since Coolify
+    API deploy works fine.
+
+---
+
+## 4. Files map (key files to know)
+```
+app/page.tsx              — entire single-page UI (sidebar layout, all tabs)
+app/api/broker/
+  fyers/callback/route.ts — reads auth_code (not code) from Fyers redirect
+  fyers/prepare/route.ts  — builds OAuth URL using APP_URL env
+  icici/oauth-callback/   — ICICI OAuth callback
+  stream-status/route.ts  — returns WS tick freshness from Redis
+app/api/alerts/route.ts   — CRUD + toggle
+app/api/watchlist/route.ts — NEEDS enrichment with Redis LTP
+app/api/export/route.ts   — CSV export (check format matches old app)
+app/api/intraday/         — check if /summary subpath exists
+lib/ltp.ts                — unified LTP: ICICI→Fyers→Yahoo. Outside active window returns cached.
+lib/broker-icici.ts       — breezeLtp, resolveSymbol, SYMBOL_OVERRIDES
+lib/breeze-ws.ts          — Socket.IO WS to livestream.icicidirect.com (sessionToken fixed)
+lib/fyers-ws.ts           — WebSocket to socket.fyers.in
+lib/symbols.ts            — searchSymbols (name/contains OR, returns baseSymbol)
+worker/index.ts           — alert monitor (reads getLtp), streamPrices, schedulers
+```
+
+---
+
+## 5. Env vars in Coolify (both app + worker)
+`DATABASE_URL`, `REDIS_URL`, `CRON_SECRET=bingo_cron_secret_2026`, `NODE_ENV=production`,
+`APP_URL=https://maxcap.co.in`, `GROQ_API_KEY`, `CEREBRAS_API_KEY`, `OPENROUTER_API_KEY`
+
+---
+
+## 6. Next 10 tasks (in priority order)
+1. **Fix alert LTP** — pass `force:true` to `getLtp` in `worker/index.ts` alert monitor so it
+   doesn't return stale cache outside active window. Also add Redis read shortcut.
+2. **Enrich watchlist route** — join Redis price cache into `/api/watchlist` GET response.
+3. **Fix Symbols tab search** — wire `SymbolCombobox` results to the results table below it.
+4. **Verify/add intraday summary route** — check `app/api/intraday/[date]/route.ts` exists.
+5. **Fyers login verification** — user must register redirect URI at myapi.fyers.in first.
+6. **Alert monitor → Redis-first LTP** — read `price:EXCHANGE:SYMBOL` from Redis in worker,
+   fall back to REST only if missing. Eliminates ICICI/Yahoo REST calls every 30s.
+7. **NSE-blocked routes** — add broker data fallback for nifty50/breadth/screener when NSE is blocked.
+8. **Export CSV format** — compare with old Replit app fields and match exactly.
+9. **Mobile layout pass** — sidebar needs mobile hamburger menu.
+10. **ICICI Security Master download** — optional; static SYMBOL_OVERRIDES covers Nifty50.
+
+---
+
+## 7. Context window strategy (READ THIS)
+Sessions get heavy fast. Use this workflow:
+- **Fresh session**: paste RESUME_PROMPT.md → Claude reads 3 files → 5-line summary → work.
+- **Each task**: one focused task per message. Don't combine many changes.
+- **After each task**: ask Claude to update SESSION_HANDOFF.md and CURRENT_TASK.md.
+- **Context too big**: start a new chat, paste RESUME_PROMPT.md content. Sonnet is fine for
+  most tasks. Use Opus only for architecture decisions.
+- The 3 docs (CLAUDE.md, SESSION_HANDOFF.md, RESUME_PROMPT.md) ARE the memory. Keep them tight.
