@@ -1,9 +1,81 @@
 /** NSE market data helpers — used by API routes */
+import { cacheGet, cacheSet } from "./redis";
+
 const NSE_HEADERS = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
   "Accept": "application/json",
   "Referer": "https://www.nseindia.com/",
 };
+
+// ─── Nifty 50 data with NSE→Yahoo fallback + Redis cache ─────────────────────
+export interface NiftyStock {
+  symbol: string; name: string; sector: string;
+  ltp: number; changePercent: number; change: number;
+  volume: number; high52w: number; low52w: number; prevClose: number;
+}
+
+async function nseNifty50(): Promise<NiftyStock[]> {
+  const res = await fetch("https://www.nseindia.com/api/equity-stockIndices?index=NIFTY%2050", {
+    headers: NSE_HEADERS,
+  });
+  if (!res.ok) throw new Error(`NSE ${res.status}`);
+  const text = await res.text();
+  if (text.trimStart().startsWith("<")) throw new Error("NSE returned HTML (IP blocked)");
+  const stocks = (JSON.parse(text).data ?? []) as Array<Record<string, unknown>>;
+  return stocks
+    .filter((s) => !String(s.symbol).startsWith("NIFTY"))
+    .map((s) => ({
+      symbol: String(s.symbol),
+      name: String(s.meta ?? s.symbol),
+      sector: SECTOR_MAP[String(s.symbol)] ?? "Other",
+      ltp: +(Number(s.lastPrice) || 0).toFixed(2),
+      changePercent: +(Number(s.pChange) || 0).toFixed(2),
+      change: +(Number(s.change) || 0).toFixed(2),
+      volume: Number(s.totalTradedVolume) || 0,
+      high52w: +(Number(s.yearHigh) || 0).toFixed(2),
+      low52w: +(Number(s.yearLow) || 0).toFixed(2),
+      prevClose: +(Number(s.previousClose) || 0).toFixed(2),
+    }));
+}
+
+async function yahooNifty50(): Promise<NiftyStock[]> {
+  // Yahoo batch quote — one HTTP call for all 50 symbols
+  const syms = Object.keys(SECTOR_MAP).map((s) => encodeURIComponent(`${s}.NS`)).join(",");
+  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${syms}&fields=regularMarketPrice,regularMarketChangePercent,regularMarketChange,regularMarketVolume,fiftyTwoWeekHigh,fiftyTwoWeekLow,regularMarketPreviousClose,shortName`;
+  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+  const data = await res.json();
+  return ((data?.quoteResponse?.result ?? []) as Array<Record<string, unknown>>)
+    .map((q) => {
+      const sym = String(q.symbol ?? "").replace(/\.NS$/, "");
+      return {
+        symbol: sym,
+        name: String(q.shortName ?? q.longName ?? sym),
+        sector: SECTOR_MAP[sym] ?? "Other",
+        ltp: +(Number(q.regularMarketPrice) || 0).toFixed(2),
+        changePercent: +(Number(q.regularMarketChangePercent) || 0).toFixed(2),
+        change: +(Number(q.regularMarketChange) || 0).toFixed(2),
+        volume: Number(q.regularMarketVolume) || 0,
+        high52w: +(Number(q.fiftyTwoWeekHigh) || 0).toFixed(2),
+        low52w: +(Number(q.fiftyTwoWeekLow) || 0).toFixed(2),
+        prevClose: +(Number(q.regularMarketPreviousClose) || 0).toFixed(2),
+      };
+    })
+    .filter((s) => s.ltp > 0);
+}
+
+// Exported getter: NSE → Yahoo fallback → Redis cache (5 min)
+export async function getNifty50Data(): Promise<NiftyStock[]> {
+  const cached = await cacheGet<NiftyStock[]>("nifty50_data");
+  if (cached?.length) return cached;
+  let data: NiftyStock[] = [];
+  try {
+    data = await nseNifty50();
+  } catch {
+    try { data = await yahooNifty50(); } catch { /* both failed; return empty */ }
+  }
+  if (data.length) await cacheSet("nifty50_data", data, 300);
+  return data;
+}
 
 export async function nseGet<T>(path: string): Promise<T> {
   const res = await fetch(`https://www.nseindia.com/api${path}`, {
