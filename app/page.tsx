@@ -1,11 +1,12 @@
 "use client";
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import {
   LayoutDashboard, Eye, TrendingUp, Target, Activity, BookOpen,
   Search, Newspaper, Bell, Clock, Layers, FileText, Wifi,
   Database, Settings2, Zap, ChevronDown, ChevronUp, X, Plus,
   RefreshCw, Download, BarChart2, History, AlertTriangle,
   CheckCircle2, Circle, Loader2, Copy, ExternalLink,
+  Sparkles, Send, Calculator, StickyNote, MoreHorizontal,
 } from "lucide-react";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -19,17 +20,14 @@ const cc = (n: number | null | undefined) =>
   !n ? "text-slate-400" : n > 0 ? "text-green-400" : "text-red-400";
 const today = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
 
-type Page =
-  | "dashboard" | "watchlist" | "portfolio" | "sip" | "intraday"
-  | "journal" | "screener" | "news" | "alerts" | "alert-history"
-  | "options" | "filings" | "brokers" | "symbols" | "settings";
+// Page type defined above with MobileNav
 
-// ─── shared style tokens ───────────────────────────────────────────────────────
-const inp = "bg-[#0f172a] border border-[#334155] rounded-md px-3 py-1.5 text-slate-200 text-sm w-full focus:outline-none focus:border-green-500/60";
+// ─── shared style tokens (CSS-variable aware for theming) ─────────────────────
+const inp = "bg-[var(--bg-panel)] border border-[var(--bd-s)] rounded-md px-3 py-1.5 text-[var(--fg)] text-sm w-full focus:outline-none focus:border-green-500/60";
 const btn = (c: string) => `px-3 py-1.5 rounded-md text-sm font-semibold cursor-pointer border-none whitespace-nowrap ${c}`;
-const card = "bg-[#1e293b] border border-[#334155] rounded-xl p-4";
-const th = "text-xs text-slate-500 font-medium text-left py-1.5 px-2";
-const td = "py-1.5 px-2 text-sm border-b border-[#1e293b]";
+const card = "bg-[var(--bg-card)] border border-[var(--bd-s)] rounded-xl p-4";
+const th = "text-xs text-[var(--fg-d)] font-medium text-left py-1.5 px-2";
+const td = "py-1.5 px-2 text-sm border-b border-[var(--bd)]";
 
 // ─── SymbolCombobox ────────────────────────────────────────────────────────────
 interface SymRes { symbol: string; baseSymbol: string; name: string; exchange: string; type: string }
@@ -153,6 +151,213 @@ const NAV_BOTTOM: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: "settings", label: "Settings", icon: <Settings2 size={14}/> },
 ];
 
+// ─── Risk Calculator ──────────────────────────────────────────────────────────
+function RiskCalc({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [capital, setCapital] = useState("100000");
+  const [riskPct, setRiskPct] = useState("1");
+  const [entry, setEntry] = useState(""); const [sl, setSl] = useState(""); const [target, setTarget] = useState("");
+  const cap = Number(capital) || 0, rPct = Number(riskPct) || 1;
+  const ent = Number(entry) || 0, slP = Number(sl) || 0, tgt = Number(target) || 0;
+  const maxRisk = cap * rPct / 100;
+  const slPct = ent && slP ? Math.abs((slP - ent) / ent * 100) : 0;
+  const qty = ent && slP ? Math.floor(maxRisk / Math.abs(ent - slP)) : 0;
+  const posSize = qty * ent;
+  const rr = ent && slP && tgt ? Math.abs(tgt - ent) / Math.abs(slP - ent) : 0;
+  if (!open) return null;
+  return (
+    <div className="fixed inset-y-0 right-0 w-80 bg-[var(--bg-card)] border-l border-[var(--bd-s)] shadow-2xl z-50 flex flex-col">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--bd-s)] shrink-0">
+        <span className="text-sm font-semibold flex items-center gap-2"><Calculator size={14} className="text-amber-400"/>Risk Calculator <span className="text-[10px] text-[var(--fg-d)]">Press R</span></span>
+        <button onClick={onClose} className="text-[var(--fg-m)] hover:text-[var(--fg)]"><X size={14}/></button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div><label className="text-xs text-[var(--fg-d)] mb-1 block">Capital (₹)</label><input className={inp} type="number" value={capital} onChange={e=>setCapital(e.target.value)}/></div>
+        <div>
+          <label className="text-xs text-[var(--fg-d)] mb-1 block">Risk %</label>
+          <input className={inp} type="number" step="0.1" value={riskPct} onChange={e=>setRiskPct(e.target.value)}/>
+          <div className="text-xs text-amber-400 mt-1 tabular-nums">Max risk: ₹{fmt(maxRisk)}</div>
+        </div>
+        <div className="border-t border-[var(--bd)] pt-3">
+          <div className="text-xs text-[var(--fg-d)] mb-2">Trade Parameters</div>
+          <div className="grid grid-cols-3 gap-2">
+            <div><label className="text-[10px] text-[var(--fg-d)] block mb-1">Entry ₹</label><input className={inp} type="number" value={entry} onChange={e=>setEntry(e.target.value)}/></div>
+            <div><label className="text-[10px] text-[var(--fg-d)] block mb-1">Stop Loss ₹</label><input className={inp} type="number" value={sl} onChange={e=>setSl(e.target.value)}/></div>
+            <div><label className="text-[10px] text-[var(--fg-d)] block mb-1">Target ₹</label><input className={inp} type="number" value={target} onChange={e=>setTarget(e.target.value)}/></div>
+          </div>
+        </div>
+        {ent > 0 && slP > 0 && (
+          <div className="bg-[var(--bg-panel)] rounded-lg p-3 space-y-2 text-sm">
+            {[
+              ["Quantity", `${qty} shares`, ""],
+              ["Position Size", `₹${fmt(posSize)}`, ""],
+              ["Capital Used", `${cap?(posSize/cap*100).toFixed(1):0}%`, ""],
+              ["SL %", `${slPct.toFixed(2)}%`, "text-red-400"],
+              ...(tgt > 0 ? [["R:R Ratio", `1:${rr.toFixed(2)}`, rr>=2?"text-green-400":rr>=1?"text-amber-400":"text-red-400"]] : []),
+            ].map(([label, val, cls]) => (
+              <div key={String(label)} className="flex justify-between">
+                <span className="text-[var(--fg-m)]">{label}</span>
+                <span className={`font-bold tabular-nums ${cls}`}>{val}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Quick Notepad ────────────────────────────────────────────────────────────
+function QuickNotepad({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [text, setText] = useState(() => { try { return localStorage.getItem("bingo_notepad") ?? ""; } catch { return ""; } });
+  const [saved, setSaved] = useState(false);
+  const [pos, setPos] = useState({ x: 24, y: 120 });
+  const [dragging, setDragging] = useState(false);
+  const drag = useRef({ mx: 0, my: 0, px: 0, py: 0 });
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => { try { const p = localStorage.getItem("bingo_np"); if (p) setPos(JSON.parse(p)); } catch {} }, []);
+  const onChange = (v: string) => {
+    setText(v); clearTimeout(timer.current);
+    timer.current = setTimeout(() => { try { localStorage.setItem("bingo_notepad", v); setSaved(true); setTimeout(()=>setSaved(false),1500); } catch {} }, 400);
+  };
+  const onMD = (e: React.MouseEvent) => { setDragging(true); drag.current = { mx: e.clientX, my: e.clientY, px: pos.x, py: pos.y }; };
+  useEffect(() => {
+    if (!dragging) return;
+    const mv = (e: MouseEvent) => setPos({ x: Math.max(0,drag.current.px+e.clientX-drag.current.mx), y: Math.max(0,drag.current.py+e.clientY-drag.current.my) });
+    const up = () => { setDragging(false); try { localStorage.setItem("bingo_np", JSON.stringify(pos)); } catch {} };
+    window.addEventListener("mousemove", mv); window.addEventListener("mouseup", up);
+    return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
+  }, [dragging, pos]);
+  if (!open) return null;
+  return (
+    <div style={{ position:"fixed", left:pos.x, top:pos.y, zIndex:60 }} className="w-72 bg-[var(--bg-card)] border border-[var(--bd-s)] rounded-xl shadow-2xl flex flex-col">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--bd-s)] cursor-move select-none" onMouseDown={onMD}>
+        <span className="text-xs font-semibold text-[var(--fg-m)] flex items-center gap-1.5"><StickyNote size={11}/>Notepad <span className="text-[10px] text-[var(--fg-d)]">Ctrl+Shift+N</span></span>
+        <div className="flex items-center gap-1.5">{saved && <CheckCircle2 size={11} className="text-green-400"/>}<button onClick={onClose} className="text-[var(--fg-d)] hover:text-[var(--fg)]"><X size={11}/></button></div>
+      </div>
+      <textarea className="bg-transparent text-sm text-[var(--fg)] p-3 resize-none focus:outline-none font-mono h-44 placeholder:text-[var(--fg-d)]"
+        placeholder="Quick notes…" value={text} onChange={e=>onChange(e.target.value)}/>
+    </div>
+  );
+}
+
+// ─── AI Chat Panel ────────────────────────────────────────────────────────────
+function ChatPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [msgs, setMsgs] = useState<{role:"user"|"ai";text:string}[]>([
+    { role:"ai", text:"Hi! Ask me about markets, your portfolio, or any stock.\n\nTry: 'Market overview', 'Portfolio analysis', 'Trade ideas', or a stock symbol like RELIANCE." }
+  ]);
+  const [input, setInput] = useState(""); const [busy, setBusy] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [msgs]);
+  const send = async (q?: string) => {
+    const text = (q ?? input).trim(); if (!text || busy) return;
+    setInput(""); setMsgs(m => [...m, { role:"user", text }]); setBusy(true);
+    const lq = text.toLowerCase();
+    let path = "/ai/market-summary", body: unknown = undefined;
+    if (lq.includes("risk")||lq.includes("score")) { path="/ai/risk-score"; body={}; }
+    else if (lq.includes("trade idea")||lq.includes("idea")) { path="/ai/trade-ideas"; body={topGainers:[]}; }
+    else if (lq.includes("portfolio")||lq.includes("analys")) { path="/ai/portfolio-analysis"; body={holdings:[]}; }
+    else if (lq.includes("journal")) { path="/ai/journal-analysis"; body={}; }
+    else if (/^[A-Z]{2,10}$/.test(text.split(" ")[0])) path=`/ai/stock-research?symbol=${text.split(" ")[0].toUpperCase()}`;
+    const r = body !== undefined
+      ? await fetch("/api"+path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(x=>x.json()).catch(()=>({}))
+      : await fetch("/api"+path).then(x=>x.json()).catch(()=>({}));
+    const out = r.summary||r.analysis||r.research||r.plan||r.insight||
+      (r.ideas?r.ideas.map((x:unknown)=>`• ${x}`).join("\n"):"")||
+      r.error||"No response.";
+    setMsgs(m => [...m, { role:"ai", text: out+(r.provider?`\n\n— ${r.provider}`:"") }]);
+    setBusy(false);
+  };
+  if (!open) return null;
+  return (
+    <div className="fixed bottom-8 right-4 w-[380px] h-[520px] bg-[var(--bg-card)] border border-[var(--bd-s)] rounded-xl shadow-2xl z-50 flex flex-col">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--bd-s)] shrink-0">
+        <span className="text-sm font-semibold text-green-400 flex items-center gap-1.5"><Sparkles size={13}/>AI Assistant</span>
+        <div className="flex gap-2">
+          <button onClick={()=>setMsgs([{role:"ai",text:"Chat cleared."}])} className="text-[var(--fg-d)] hover:text-[var(--fg)] text-xs">Clear</button>
+          <button onClick={onClose} className="text-[var(--fg-m)] hover:text-[var(--fg)]"><X size={14}/></button>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        {msgs.map((m,i)=>(
+          <div key={i} className={`flex ${m.role==="user"?"justify-end":"justify-start"}`}>
+            <div className={`max-w-[88%] text-sm rounded-xl px-3 py-2 whitespace-pre-wrap leading-relaxed ${m.role==="user"?"bg-green-700/60 text-green-100":"bg-[var(--bg-panel)] text-[var(--fg-m)]"}`}>{m.text}</div>
+          </div>
+        ))}
+        {busy&&<div className="flex"><div className="bg-[var(--bg-panel)] text-[var(--fg-d)] text-sm rounded-xl px-3 py-2 flex items-center gap-2"><Loader2 size={12} className="animate-spin"/>Thinking…</div></div>}
+        <div ref={bottomRef}/>
+      </div>
+      <div className="border-t border-[var(--bd-s)] p-3 shrink-0 space-y-2">
+        <div className="flex gap-1.5 flex-wrap">
+          {["Market overview","Portfolio","Trade ideas","Risk score"].map(q=>(
+            <button key={q} onClick={()=>send(q)} className="text-[10px] px-2 py-0.5 rounded bg-[var(--bg-panel)] text-[var(--fg-d)] hover:text-[var(--fg)]">{q}</button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input className="flex-1 bg-[var(--bg-panel)] border border-[var(--bd-s)] rounded-lg px-3 py-1.5 text-sm text-[var(--fg)] focus:outline-none focus:border-green-500/60"
+            placeholder="Ask anything…" value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&!e.shiftKey&&send()}/>
+          <button onClick={()=>send()} disabled={busy||!input.trim()} className="px-3 py-1.5 bg-green-600 hover:bg-green-500 disabled:opacity-40 rounded-lg text-white">
+            <Send size={14}/>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Mobile Nav ───────────────────────────────────────────────────────────────
+type Page = "dashboard"|"watchlist"|"portfolio"|"sip"|"intraday"|"journal"|"screener"|"news"|"alerts"|"alert-history"|"options"|"filings"|"brokers"|"symbols"|"settings";
+function MobileNav({ page, go, onMore }: { page: Page; go: (p:Page)=>void; onMore: ()=>void }) {
+  const tabs: {id:Page;icon:React.ReactNode;label:string}[] = [
+    {id:"dashboard",icon:<LayoutDashboard size={18}/>,label:"Home"},
+    {id:"watchlist",icon:<Eye size={18}/>,label:"Watch"},
+    {id:"portfolio",icon:<TrendingUp size={18}/>,label:"Portfolio"},
+    {id:"alerts",icon:<Bell size={18}/>,label:"Alerts"},
+    {id:"journal",icon:<BookOpen size={18}/>,label:"Journal"},
+  ];
+  return (
+    <div className="flex md:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--bg-panel)] border-t border-[var(--bd-s)]">
+      {tabs.map(t=>(
+        <button key={t.id} onClick={()=>go(t.id)} className={`flex-1 flex flex-col items-center py-2 gap-0.5 text-[10px] transition-colors ${page===t.id?"text-green-400":"text-[var(--fg-d)]"}`}>
+          {t.icon}{t.label}
+        </button>
+      ))}
+      <button onClick={onMore} className="flex-1 flex flex-col items-center py-2 gap-0.5 text-[10px] text-[var(--fg-d)]">
+        <MoreHorizontal size={18}/>More
+      </button>
+    </div>
+  );
+}
+function MobileDrawer({ open, page, go, onClose }: { open:boolean; page:Page; go:(p:Page)=>void; onClose:()=>void }) {
+  const items: {id:Page;icon:React.ReactNode;label:string}[] = [
+    {id:"screener",icon:<Search size={14}/>,label:"Screener"},
+    {id:"intraday",icon:<Activity size={14}/>,label:"Intraday"},
+    {id:"sip",icon:<Target size={14}/>,label:"SIP"},
+    {id:"news",icon:<Newspaper size={14}/>,label:"News"},
+    {id:"alert-history",icon:<History size={14}/>,label:"History"},
+    {id:"options",icon:<Layers size={14}/>,label:"Options"},
+    {id:"filings",icon:<FileText size={14}/>,label:"Filings"},
+    {id:"brokers",icon:<Wifi size={14}/>,label:"Brokers"},
+    {id:"symbols",icon:<Database size={14}/>,label:"Symbols"},
+    {id:"settings",icon:<Settings2 size={14}/>,label:"Settings"},
+  ];
+  if (!open) return null;
+  return (
+    <>
+      <div className="fixed inset-0 z-40 bg-black/60" onClick={onClose}/>
+      <div className="fixed bottom-14 left-0 right-0 z-50 bg-[var(--bg-card)] border-t border-[var(--bd-s)] rounded-t-2xl p-4 md:hidden">
+        <div className="w-10 h-1 bg-[var(--bd-s)] rounded-full mx-auto mb-4"/>
+        <div className="grid grid-cols-5 gap-2">
+          {items.map(item=>(
+            <button key={item.id} onClick={()=>{go(item.id);onClose();}} className={`flex flex-col items-center gap-1 py-2 px-1 rounded-lg text-[11px] transition-colors ${page===item.id?"bg-green-500/15 text-green-400":"text-[var(--fg-d)] hover:text-[var(--fg)] hover:bg-white/5"}`}>
+              {item.icon}{item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── Main component ────────────────────────────────────────────────────────────
 export default function Home() {
   const [page, setPage] = useState<Page>("dashboard");
@@ -179,6 +384,17 @@ export default function Home() {
   const [filings, setFilings] = useState<{ id: number; exchange: string; symbol?: string; company?: string; category?: string; subject?: string; attachment?: string; createdAt: string }[]>([]);
   const [symStatus, setSymStatus] = useState<{ total: number; byExchange: Record<string,number>; status?: { state?: string } } | null>(null);
   const [streamStatus, setStreamStatus] = useState<{ iciciConnected: boolean; fyersConnected: boolean; streaming: boolean; source?: string; lastTickAgeSec?: number|null } | null>(null);
+
+  // overlay panels
+  const [riskOpen, setRiskOpen] = useState(false);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [mobileDrawer, setMobileDrawer] = useState(false);
+  // theme
+  const [theme, setTheme] = useState<"dark"|"light"|"sepia">("dark");
+  // portfolio category
+  const [pCat, setPCat] = useState("equity");
+  const [pTag, setPTag] = useState("");
 
   // broker state
   const [iciciStatus, setIciciStatus] = useState<{ connected: boolean; userName?: string; hasSecret?: boolean } | null>(null);
@@ -345,6 +561,44 @@ export default function Home() {
     return () => clearInterval(t);
   }, [page, loadWatchlist]);
 
+  // SSE real-time price stream for watchlist
+  const wlKey = useMemo(() => watchlist.map(w => `${w.exchange}:${w.symbol}`).sort().join(","), [watchlist.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!wlKey || page !== "watchlist") return;
+    const es = new EventSource(`/api/prices/stream?symbols=${wlKey}`);
+    es.onmessage = (e) => {
+      try {
+        const prices = JSON.parse(e.data) as Record<string,{ltp:number;changePercent:number;change:number}>;
+        setWatchlist(wl => wl.map(w => { const p = prices[`${w.exchange}:${w.symbol}`]; return p ? {...w,...p} : w; }));
+      } catch { /* ignore */ }
+    };
+    return () => es.close();
+  }, [page, wlKey]);
+
+  // Theme: restore from localStorage + apply class to <html>
+  useEffect(() => {
+    try { const t = localStorage.getItem("bingo_theme") as "dark"|"light"|"sepia"|null; if(t) setTheme(t); } catch {}
+  }, []);
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.remove("theme-light","theme-sepia");
+    if (theme !== "dark") root.classList.add(`theme-${theme}`);
+    try { localStorage.setItem("bingo_theme", theme); } catch {}
+  }, [theme]);
+
+  // Keyboard shortcuts: R = risk calculator, Ctrl+Shift+N = notepad, Esc = close panels
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      const editable = ["INPUT","TEXTAREA","SELECT"].includes(tag);
+      if (e.key==="r" && !editable && !e.ctrlKey && !e.metaKey) setRiskOpen(o=>!o);
+      if (e.key==="n" && e.ctrlKey && e.shiftKey) { e.preventDefault(); setNoteOpen(o=>!o); }
+      if (e.key==="Escape") { setRiskOpen(false); setNoteOpen(false); setMobileDrawer(false); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // current IST time in status bar
   const [nowIST, setNowIST] = useState("");
   useEffect(() => {
@@ -380,12 +634,12 @@ export default function Home() {
 
   // ───────────────────────────────────────────────────────────────────────────
   return (
-    <div className="flex h-dvh overflow-hidden bg-[#030712] text-slate-200">
+    <div className="flex h-dvh overflow-hidden bg-[var(--bg)] text-[var(--fg)]">
 
       {/* ── Sidebar ── */}
-      <aside className="hidden md:flex flex-col w-48 h-full bg-[#0f172a] border-r border-[#1e293b] shrink-0">
+      <aside className="hidden md:flex flex-col w-48 h-full bg-[var(--bg-panel)] border-r border-[var(--bd)] shrink-0">
         {/* logo */}
-        <div className="h-12 px-4 flex items-center gap-2.5 border-b border-[#1e293b] shrink-0">
+        <div className="h-12 px-4 flex items-center gap-2.5 border-b border-[var(--bd)] shrink-0">
           <div className="w-6 h-6 bg-green-500 rounded-[4px] flex items-center justify-center shrink-0">
             <Zap size={13} className="text-black fill-black"/>
           </div>
@@ -394,11 +648,11 @@ export default function Home() {
         {/* nav */}
         <nav className="flex-1 py-2 overflow-y-auto">
           {NAV_MAIN.map(n => <NavItem key={n.id} {...n}/>)}
-          <div className="my-2 mx-4 border-t border-[#1e293b]"/>
+          <div className="my-2 mx-4 border-t border-[var(--bd)]"/>
           {NAV_BOTTOM.map(n => <NavItem key={n.id} {...n}/>)}
         </nav>
         {/* broker quick status */}
-        <div className="border-t border-[#1e293b] px-4 py-3 text-xs text-slate-500 shrink-0 space-y-1">
+        <div className="border-t border-[var(--bd)] px-4 py-3 text-xs text-[var(--fg-d)] shrink-0 space-y-1">
           <div className="flex items-center gap-1.5">
             <span className={`w-1.5 h-1.5 rounded-full ${iciciStatus?.connected ? "bg-green-500" : "bg-slate-600"}`}/>
             ICICI {iciciStatus?.connected ? iciciStatus.userName ?? "Connected" : "Offline"}
@@ -414,7 +668,7 @@ export default function Home() {
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
 
         {/* top bar */}
-        <header className="h-12 bg-[#0f172a] border-b border-[#1e293b] px-5 flex items-center justify-between shrink-0">
+        <header className="h-12 bg-[var(--bg-panel)] border-b border-[var(--bd)] px-5 flex items-center justify-between shrink-0">
           <span className="text-[15px] font-semibold">{PAGE_TITLE[page]}</span>
           <div className="flex items-center gap-3">
             {mktStatus?.appActive === false && (
@@ -430,7 +684,7 @@ export default function Home() {
         </header>
 
         {/* page content */}
-        <main className="flex-1 overflow-y-auto p-5">
+        <main className="flex-1 overflow-y-auto p-5 pb-20 md:pb-5">
 
           {/* ─── DASHBOARD ─── */}
           {page === "dashboard" && (
@@ -486,19 +740,31 @@ export default function Home() {
                   ) : <div className="text-slate-500 text-sm">Loading…</div>}
                 </div>
                 <div className={`${card} md:col-span-2`}>
-                  <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">FII / DII Flows (₹ Cr)</h3>
-                  <table className="w-full text-xs">
-                    <thead><tr className="text-slate-500 border-b border-[#334155]">
-                      <th className="text-left py-1 font-medium">Date</th><th className="text-right font-medium">FII Equity</th><th className="text-right font-medium">DII Equity</th>
-                    </tr></thead>
-                    <tbody>{fiiDii.slice(-5).reverse().map(r=>(
-                      <tr key={r.date} className="border-b border-[#1e293b]">
-                        <td className="py-1">{r.date}</td>
-                        <td className={`text-right ${cc(r.fiiNetEquity)}`}>{r.fiiNetEquity>=0?"+":""}{fmt(r.fiiNetEquity)}</td>
-                        <td className={`text-right ${cc(r.diiNetEquity)}`}>{r.diiNetEquity>=0?"+":""}{fmt(r.diiNetEquity)}</td>
-                      </tr>
-                    ))}</tbody>
-                  </table>
+                  <h3 className="text-xs font-semibold text-[var(--fg-d)] uppercase tracking-wider mb-3">FII / DII Flows (₹ Cr)</h3>
+                  {fiiDii.slice(-5).reverse().map(r => {
+                    const maxAbs = Math.max(...fiiDii.map(x=>Math.abs(x.fiiNetEquity||0)),1);
+                    const fiiW = Math.min(Math.abs(r.fiiNetEquity||0)/maxAbs*100,100);
+                    const diiW = Math.min(Math.abs(r.diiNetEquity||0)/maxAbs*100,100);
+                    return (
+                      <div key={r.date} className="mb-2">
+                        <div className="flex justify-between text-[10px] text-[var(--fg-d)] mb-0.5">
+                          <span>{r.date}</span>
+                          <span className="flex gap-3">
+                            <span className={cc(r.fiiNetEquity)}>FII {r.fiiNetEquity>=0?"+":""}{fmt(r.fiiNetEquity)}</span>
+                            <span className={cc(r.diiNetEquity)}>DII {r.diiNetEquity>=0?"+":""}{fmt(r.diiNetEquity)}</span>
+                          </span>
+                        </div>
+                        <div className="flex gap-1 h-1.5">
+                          <div className="flex-1 bg-[var(--bd)] rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full ${r.fiiNetEquity>=0?"bg-green-500":"bg-red-500"}`} style={{width:`${fiiW}%`}}/>
+                          </div>
+                          <div className="flex-1 bg-[var(--bd)] rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full ${r.diiNetEquity>=0?"bg-blue-500":"bg-orange-500"}`} style={{width:`${diiW}%`}}/>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -581,29 +847,35 @@ export default function Home() {
               )}
               <div className={card}>
                 <h3 className="text-sm font-semibold mb-3">Add Holding</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-2">
                   <SymbolCombobox value={pSym} exchange={pEx} onChange={setPSym} onSelect={(s,ex)=>{setPSym(s);setPEx(ex);}} className="col-span-2 sm:col-span-1"/>
                   <select className={inp} value={pEx} onChange={e=>setPEx(e.target.value)}><option>NSE</option><option>BSE</option></select>
+                  <select className={inp} value={pCat} onChange={e=>setPCat(e.target.value)}>
+                    <option value="equity">Equity</option><option value="mf">MF</option><option value="etf">ETF</option>
+                    <option value="sgb">SGB</option><option value="fd">FD</option><option value="other">Other</option>
+                  </select>
+                  <input className={inp} placeholder="Account tag" value={pTag} onChange={e=>setPTag(e.target.value)}/>
                   <input className={inp} type="number" placeholder="Qty" value={pQty} onChange={e=>setPQty(e.target.value)}/>
                   <input className={inp} type="number" placeholder="Avg Price ₹" value={pAvg} onChange={e=>setPAvg(e.target.value)}/>
                   <input className={inp} type="date" value={pDate} onChange={e=>setPDate(e.target.value)}/>
                   <input className={inp} placeholder="Notes" value={pNotes} onChange={e=>setPNotes(e.target.value)}/>
                   <button className={btn("bg-green-600 text-white")} onClick={async()=>{
                     if(!pSym||!pQty||!pAvg){alert("Fill symbol, qty, avg price");return;}
-                    await api("/portfolio",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol:pSym,exchange:pEx,qty:+pQty,avg_price:+pAvg,buy_date:pDate,notes:pNotes})});
-                    loadPortfolio(); setPSym("");setPQty("");setPAvg("");
+                    await api("/portfolio",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({symbol:pSym,exchange:pEx,qty:+pQty,avg_price:+pAvg,buy_date:pDate,category:pCat,account_tag:pTag,notes:pNotes})});
+                    loadPortfolio(); setPSym("");setPQty("");setPAvg("");setPTag("");
                   }}>Add</button>
                 </div>
               </div>
               <div className={card}>
                 <div className="overflow-x-auto">
-                  <table className="w-full"><thead><tr className="border-b border-[#334155]">
-                    <th className={th}>Symbol</th><th className={th}>Sector</th><th className={`${th} text-right`}>Qty</th><th className={`${th} text-right`}>Avg</th><th className={`${th} text-right`}>LTP</th><th className={`${th} text-right`}>Invested</th><th className={`${th} text-right`}>Current</th><th className={`${th} text-right`}>P&L</th><th className={`${th} text-right`}>%</th><th className={`${th} text-right`}>XIRR</th><th className={th}></th>
+                  <table className="w-full"><thead><tr className="border-b border-[var(--bd-s)]">
+                    <th className={th}>Symbol</th><th className={th}>Cat</th><th className={th}>Sector</th><th className={`${th} text-right`}>Qty</th><th className={`${th} text-right`}>Avg</th><th className={`${th} text-right`}>LTP</th><th className={`${th} text-right`}>Invested</th><th className={`${th} text-right`}>Current</th><th className={`${th} text-right`}>P&L</th><th className={`${th} text-right`}>%</th><th className={`${th} text-right`}>XIRR</th><th className={th}></th>
                   </tr></thead>
                   <tbody>{(portfolio?.holdings??[]).map((h:Record<string,unknown>)=>(
                     <tr key={String(h.id)} className="hover:bg-white/[0.02]">
-                      <td className={`${td} font-semibold`}>{String(h.symbol)}<br/><span className="text-[10px] text-slate-500">{String(h.exchange)}</span></td>
-                      <td className={`${td} text-xs text-slate-400`}>{String(h.sector||"—")}</td>
+                      <td className={`${td} font-semibold`}>{String(h.symbol)}<br/><span className="text-[10px] text-[var(--fg-d)]">{String(h.exchange)}</span></td>
+                      <td className={td}><span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/40 text-blue-400">{String(h.category||"eq")}</span></td>
+                      <td className={`${td} text-xs text-[var(--fg-m)]`}>{String(h.sector||"—")}</td>
                       <td className={`${td} text-right tabular-nums`}>{String(h.qty)}</td>
                       <td className={`${td} text-right tabular-nums`}>₹{fmt(Number(h.avg_price))}</td>
                       <td className={`${td} text-right tabular-nums`}>₹{fmt(Number(h.ltp))}</td>
@@ -937,18 +1209,23 @@ export default function Home() {
                 <button className={btn("bg-blue-600 text-white text-xs")} onClick={async()=>{const h=await api("/alerts/history");setAlertHistory(Array.isArray(h)?h:[]);}}>Refresh</button>
               </div>
               <div className="overflow-x-auto">
-                <table className="w-full"><thead><tr className="border-b border-[#334155]">
-                  <th className={th}>Triggered At</th><th className={th}>Symbol</th><th className={th}>Condition</th><th className={`${th} text-right`}>Target</th><th className={`${th} text-right`}>Triggered LTP</th>
+                <table className="w-full"><thead><tr className="border-b border-[var(--bd-s)]">
+                  <th className={th}>Triggered At</th><th className={th}>Symbol</th><th className={th}>Condition</th><th className={`${th} text-right`}>Target</th><th className={`${th} text-right`}>Trigger LTP</th><th className={`${th} text-right`}>Diff%</th>
                 </tr></thead>
-                <tbody>{alertHistory.map((h:Record<string,unknown>)=>(
+                <tbody>{alertHistory.map((h:Record<string,unknown>)=>{
+                  const tgt=Number(h.targetPrice)||0, ltp=Number(h.triggeredLtp)||0;
+                  const diff=tgt?((ltp-tgt)/tgt*100):0;
+                  return (
                   <tr key={String(h.id)} className="hover:bg-white/[0.02]">
                     <td className={`${td} text-xs`}>{new Date(String(h.triggeredAt)).toLocaleString("en-IN",{timeZone:"Asia/Kolkata"})}</td>
                     <td className={`${td} font-semibold`}>{String(h.symbol)}</td>
-                    <td className={`${td} font-mono text-center`}>{String(h.condition)}</td>
-                    <td className={`${td} text-right tabular-nums`}>₹{fmt(Number(h.targetPrice))}</td>
-                    <td className={`${td} text-right tabular-nums text-green-400`}>₹{fmt(Number(h.triggeredLtp))}</td>
+                    <td className={`${td} font-mono text-center text-amber-400`}>{String(h.condition)}</td>
+                    <td className={`${td} text-right tabular-nums`}>₹{fmt(tgt)}</td>
+                    <td className={`${td} text-right tabular-nums text-green-400`}>₹{fmt(ltp)}</td>
+                    <td className={`${td} text-right tabular-nums text-xs ${cc(diff)}`}>{diff>=0?"+":""}{diff.toFixed(2)}%</td>
                   </tr>
-                ))}</tbody></table>
+                  );
+                })}</tbody></table>
                 {!alertHistory.length && <p className="text-center text-slate-500 py-6">No trigger history yet</p>}
               </div>
             </div>
@@ -1191,6 +1468,19 @@ export default function Home() {
           {/* ─── SETTINGS ─── */}
           {page === "settings" && (
             <div className="space-y-4">
+              {/* Theme */}
+              <div className={card}>
+                <h3 className="font-semibold mb-3">Appearance</h3>
+                <div className="flex gap-3">
+                  {(["dark","light","sepia"] as const).map(t=>(
+                    <button key={t} onClick={()=>setTheme(t)}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all capitalize ${theme===t?"border-green-500 bg-green-500/10 text-green-400":"border-[var(--bd-s)] text-[var(--fg-m)] hover:border-[var(--fg-d)]"}`}>
+                      {t==="dark"?"🌙 Dark":t==="light"?"☀️ Light":"📜 Sepia"}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-[var(--fg-d)] mt-2">Theme saved automatically.</p>
+              </div>
               {/* Telegram */}
               <div className={card}>
                 <h3 className="font-semibold mb-1">Telegram Notifications</h3>
@@ -1251,7 +1541,7 @@ export default function Home() {
         </main>
 
         {/* ── Bottom status bar ── */}
-        <footer className="h-6 bg-[#0f172a] border-t border-[#1e293b] px-4 flex items-center gap-4 text-[11px] text-slate-500 shrink-0">
+        <footer className="h-6 bg-[var(--bg-panel)] border-t border-[var(--bd)] px-4 hidden md:flex items-center gap-4 text-[11px] text-[var(--fg-d)] shrink-0">
           <span className="flex items-center gap-1.5">
             <span className={`w-1.5 h-1.5 rounded-full ${streamStatus?.streaming?"bg-green-400 animate-pulse":"bg-slate-600"}`}/>
             {streamStatus?.streaming ? `● ${streamStatus.source?.toUpperCase()} LIVE` : "● Offline"}
@@ -1265,8 +1555,29 @@ export default function Home() {
         </footer>
       </div>
 
-      {/* ── Floating AI panel ── */}
+      {/* ── Floating AI panel (legacy one-shot, kept for dashboard AI button) ── */}
       <AiPanel title={aiTitle} text={aiText} busy={aiBusy} onClose={()=>{setAiTitle("");setAiText("");}}/>
+
+      {/* ── Persistent AI Chat Panel ── */}
+      <ChatPanel open={chatOpen} onClose={()=>setChatOpen(false)}/>
+
+      {/* ── Floating AI button (hidden when chat is open or a panel is covering it) ── */}
+      {!chatOpen && (
+        <button onClick={()=>setChatOpen(true)}
+          className="fixed bottom-20 right-4 md:bottom-8 z-40 w-12 h-12 bg-green-600 hover:bg-green-500 rounded-full shadow-lg flex items-center justify-center transition-all">
+          <Sparkles size={18} className="text-white"/>
+        </button>
+      )}
+
+      {/* ── Risk Calculator slide-over ── */}
+      <RiskCalc open={riskOpen} onClose={()=>setRiskOpen(false)}/>
+
+      {/* ── Quick Notepad ── */}
+      <QuickNotepad open={noteOpen} onClose={()=>setNoteOpen(false)}/>
+
+      {/* ── Mobile nav + drawer ── */}
+      <MobileNav page={page} go={goTo} onMore={()=>setMobileDrawer(true)}/>
+      <MobileDrawer open={mobileDrawer} page={page} go={goTo} onClose={()=>setMobileDrawer(false)}/>
 
     </div>
   );

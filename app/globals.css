@@ -2,17 +2,52 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Dark theme (default) ─────────────────────────────────── */
 :root {
   color-scheme: dark;
+  --bg:       #030712;
+  --bg-panel: #0f172a;
+  --bg-card:  #1e293b;
+  --bd:       #1e293b;
+  --bd-s:     #334155;
+  --fg:       #e2e8f0;
+  --fg-m:     #94a3b8;
+  --fg-d:     #64748b;
+}
+
+/* ── Light theme ──────────────────────────────────────────── */
+:root.theme-light {
+  color-scheme: light;
+  --bg:       #f1f5f9;
+  --bg-panel: #ffffff;
+  --bg-card:  #ffffff;
+  --bd:       #e2e8f0;
+  --bd-s:     #cbd5e1;
+  --fg:       #1e293b;
+  --fg-m:     #475569;
+  --fg-d:     #94a3b8;
+}
+
+/* ── Sepia theme ──────────────────────────────────────────── */
+:root.theme-sepia {
+  color-scheme: dark;
+  --bg:       #1a1307;
+  --bg-panel: #221b09;
+  --bg-card:  #2d2410;
+  --bd:       #3d3318;
+  --bd-s:     #4f4228;
+  --fg:       #e8d5b0;
+  --fg-m:     #c9b482;
+  --fg-d:     #9c8a5f;
 }
 
 body {
-  background: #030712;
-  color: #e2e8f0;
+  background: var(--bg);
+  color: var(--fg);
   font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #475569; }
+::-webkit-scrollbar-thumb { background: var(--bd-s); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--fg-d); }

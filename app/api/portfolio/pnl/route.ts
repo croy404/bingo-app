@@ -19,6 +19,7 @@ export async function GET() {
     }
     return {
       id: row.id, symbol: row.symbol, exchange: row.exchange, sector: row.sector,
+      category: row.category ?? "equity", account_tag: row.accountTag ?? "",
       qty: row.qty, avg_price: row.avgPrice, ltp: +ltp.toFixed(2),
       invested: +inv.toFixed(2), current: +cur.toFixed(2),
       pnl: +pnl.toFixed(2), pnlPercent: +pct.toFixed(2),

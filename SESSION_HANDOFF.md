@@ -1,5 +1,5 @@
 # SESSION HANDOFF — BINGO App
-**Last updated:** 2026-06-01 (end of session 2). App is deployed and healthy.
+**Last updated:** 2026-06-01 (end of session 4). App is deployed and healthy.
 Read `CLAUDE.md` first for quick guide. Secrets in local auto-memory `bingo-deployment.md`.
 
 ---
@@ -24,58 +24,44 @@ Read `CLAUDE.md` first for quick guide. Secrets in local auto-memory `bingo-depl
 - All AI routes exist and API keys set in Coolify ✅
 - Morning brief, EOD P&L, filings monitor in worker ✅
 - `/api/broker/stream-status` endpoint ✅
+- Alert monitor reads Redis price cache first, getLtp(force:true) fallback ✅ (commit 95a1a9e)
+- Watchlist GET enriched with Redis-cached ltp/changePercent/change/prevClose ✅
+- Alerts GET maps to snake_case (fixed is_active/triggered_count bug) + Redis LTP ✅
+- Intraday summary route created (FIFO P&L, win rate, per-symbol) ✅
+- Symbols tab search fixed (input+button → populates results table) ✅
+- Watchlist auto-refresh 30s polling added ✅
+- Alerts table shows LTP + distance% columns, highlights crossed alerts ✅
+- NSE-blocked routes fixed: shared `getNifty50Data()` in `lib/market-data.ts` tries NSE first, Yahoo batch fallback, Redis-cached 5 min ✅ (commit 63cfb8b)
+- Affected: `/market/nifty50`, `/market/breadth`, `/market/screener`, `/market/52week`, `/market/sector-rotation` ✅
 
 ---
 
 ## 3. Outstanding issues (things to fix next)
 
 ### HIGH PRIORITY (functional bugs)
-1. **LTP fetch on Alerts tab is broken** — alert monitor calls `getLtp()` but ICICI `breezeLtp` uses
-   `resolveSymbol()` which looks up ICICI Security Master (exchange=`ICICI` in symbols table) — that
-   table is likely empty (Security Master never downloaded). Fallback chain: ICICI → Fyers → Yahoo.
-   Yahoo fallback should work but needs `isAppActive()` to return true (market hours only).
-   **Fix:** Make alert LTP check use Yahoo as guaranteed fallback outside market hours too,
-   OR allow `force:true` in alert monitor getLtp calls. File: `worker/index.ts` line ~65 (`getLtp`
-   call) and `lib/ltp.ts`.
-
-2. **Fyers login still needs user portal action** — user must go to myapi.fyers.in, set redirect URI
+1. **Fyers login still needs user portal action** — user must go to myapi.fyers.in, set redirect URI
    to `https://maxcap.co.in/api/broker/fyers/callback`, Save, then try login from the app.
 
-3. **ICICI streaming only verifiable during market hours** (08:55–15:45 IST) — needs symbols in
+2. **ICICI streaming only verifiable during market hours** (08:55–15:45 IST) — needs symbols in
    watchlist + portfolio for the worker to subscribe to. Token lookup uses Shoonya NSE master.
 
-4. **NSE-direct routes blocked from datacenter** — `/market/nifty50`, `/market/breadth`,
+3. **NSE-direct routes blocked from datacenter** — `/market/nifty50`, `/market/breadth`,
    `/market/screener`, `/options` get HTML block page from NSE. These work when a broker is connected.
 
 ### MEDIUM PRIORITY
-5. **Alert LTP uses REST not Redis** — worker alert check calls `getLtp()` which hits ICICI/Yahoo REST
-   every 30s per symbol. Once WS streaming works, alert monitor should read from Redis
-   (`price:EXCHANGE:SYMBOL`) directly instead of making REST calls. Much faster + no rate limits.
-
-6. **Watchlist tab doesn't show live LTP** — `/api/watchlist` route returns DB rows only (symbol,
-   exchange). It doesn't join with Redis price cache. Need to enrich with cached prices.
-   File: `app/api/watchlist/route.ts`
-
-7. **Symbol search in Symbols tab doesn't update `symResults`** — the `SymbolCombobox` in Symbols
-   page calls `onSelect` but the `symResults` state is only set by the old manual search. The
-   `SymbolCombobox` itself shows its own internal dropdown; the table below it never updates.
-   Fix: Wire the `/api/symbols/search` results to the `symResults` state in the Symbols tab.
-
-8. **Intraday summary API** — route `/api/intraday/summary` may not exist. Check:
-   `find app/api/intraday -type f`. If missing, add it.
-
-9. **Export CSV format** — user wants CSV to match old Replit app format exactly. Need to check
+4. **Export CSV format** — user wants CSV to match old Replit app format exactly. Need to check
    the old app's export fields and match them in `/api/export/route.ts`.
 
-### LOW PRIORITY
-10. **ICICI Security Master** — `resolveSymbol()` in `broker-icici.ts` checks `symbols` table with
-    `exchange=ICICI`. This table is likely empty (Security Master never downloaded). The static
-    `SYMBOL_OVERRIDES` map covers Nifty50 stocks. For other stocks, fallback is the raw symbol
-    which may not match ICICI's stock code. Add a Security Master download route or use Shoonya
-    tokens directly (already done for WS streaming).
+5. **ICICI Security Master** — `resolveSymbol()` in `broker-icici.ts` checks `symbols` table with
+   `exchange=ICICI`. This table is likely empty (Security Master never downloaded). The static
+   `SYMBOL_OVERRIDES` map covers Nifty50 stocks. For other stocks, fallback is the raw symbol
+   which may not match ICICI's stock code.
 
-11. **GitHub webhook auto-deploy** — still broken (secret mismatch). Low priority since Coolify
-    API deploy works fine.
+### LOW PRIORITY
+6. **GitHub webhook auto-deploy** — still broken (secret mismatch). Low priority since Coolify
+   API deploy works fine.
+
+7. **Mobile layout** — sidebar hidden on mobile but no hamburger menu / bottom nav for mobile users.
 
 ---
 
@@ -107,19 +93,11 @@ worker/index.ts           — alert monitor (reads getLtp), streamPrices, schedu
 
 ---
 
-## 6. Next 10 tasks (in priority order)
-1. **Fix alert LTP** — pass `force:true` to `getLtp` in `worker/index.ts` alert monitor so it
-   doesn't return stale cache outside active window. Also add Redis read shortcut.
-2. **Enrich watchlist route** — join Redis price cache into `/api/watchlist` GET response.
-3. **Fix Symbols tab search** — wire `SymbolCombobox` results to the results table below it.
-4. **Verify/add intraday summary route** — check `app/api/intraday/[date]/route.ts` exists.
-5. **Fyers login verification** — user must register redirect URI at myapi.fyers.in first.
-6. **Alert monitor → Redis-first LTP** — read `price:EXCHANGE:SYMBOL` from Redis in worker,
-   fall back to REST only if missing. Eliminates ICICI/Yahoo REST calls every 30s.
-7. **NSE-blocked routes** — add broker data fallback for nifty50/breadth/screener when NSE is blocked.
-8. **Export CSV format** — compare with old Replit app fields and match exactly.
-9. **Mobile layout pass** — sidebar needs mobile hamburger menu.
-10. **ICICI Security Master download** — optional; static SYMBOL_OVERRIDES covers Nifty50.
+## 6. Next tasks (in priority order)
+1. **Fyers login** — user registers redirect URI at myapi.fyers.in, then tests OAuth flow.
+2. **Export CSV format** — compare with old Replit app fields and match exactly (`/api/export/route.ts`).
+3. **Mobile layout** — add hamburger toggle for sidebar on mobile (sidebar hidden, no way to navigate on phones).
+4. **ICICI Security Master** — optional; static SYMBOL_OVERRIDES covers Nifty50.
 
 ---
 

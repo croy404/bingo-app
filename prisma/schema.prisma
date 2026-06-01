@@ -15,6 +15,8 @@ model Portfolio {
   qty          Float
   avgPrice     Float    @map("avg_price")
   buyDate      DateTime? @map("buy_date") @db.Date
+  category     String   @default("equity")
+  accountTag   String?  @map("account_tag")
   sector       String?
   marketCap    String?  @map("market_cap")
   notes        String?

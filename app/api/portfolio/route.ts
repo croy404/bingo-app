@@ -16,6 +16,7 @@ export async function POST(req: Request) {
       symbol: sym, exchange: b.exchange ?? "NSE", companyName: b.company_name ?? "",
       qty: Number(b.qty), avgPrice: Number(b.avg_price),
       buyDate: b.buy_date ? new Date(b.buy_date) : null,
+      category: b.category ?? "equity", accountTag: b.account_tag ?? null,
       sector: SECTOR_MAP[sym] ?? "Other", notes: b.notes ?? "",
     },
   });
