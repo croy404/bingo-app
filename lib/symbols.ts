@@ -88,13 +88,51 @@ export async function downloadAll(exchanges: string[]): Promise<Record<string, n
   return result;
 }
 
-export async function searchSymbols(query: string, exchange?: string, limit = 20) {
-  const q = query.toUpperCase().trim();
-  return prisma.symbol.findMany({
-    where: { symbol: { startsWith: q }, ...(exchange ? { exchange: exchange.toUpperCase() } : {}) },
+/**
+ * Strips the Shoonya suffix from a TradingSymbol to get the clean equity symbol.
+ * e.g. "RELIANCE-EQ" → "RELIANCE", "HDFCBANK-BE" → "HDFCBANK"
+ * Futures/options (e.g. "NIFTY25JUNFUT") are returned as-is.
+ */
+export function stripSuffix(sym: string): string {
+  return sym.replace(/-(EQ|BE|SM|N1|N2|N3|N4|GR|IL|IV|MF|MT|P1|P2|P3|P4|RR|RW|ST|SGB|W1)$/i, "");
+}
+
+export async function searchSymbols(query: string, exchange?: string, limit = 30) {
+  const raw = query.trim();
+  if (!raw) return [];
+  const q = raw.toUpperCase();
+  const exFilter = exchange ? { exchange: exchange.toUpperCase() } : {};
+
+  // 1. Exact/prefix match on symbol (covers "RELIANCE" → "RELIANCE-EQ")
+  // 2. OR: symbol contains the query (covers partial like "IANCE")
+  // 3. OR: name contains the query (covers "HDFC Bank" → "HDFCBANK-EQ")
+  // Prefer EQ type and NSE exchange so results are ranked usefully.
+  const rows = await prisma.symbol.findMany({
+    where: {
+      ...exFilter,
+      OR: [
+        { symbol: { startsWith: q } },
+        { symbol: { contains: q } },
+        { name: { contains: raw, mode: "insensitive" } },
+      ],
+    },
     select: { symbol: true, name: true, exchange: true, type: true, isin: true, token: true },
-    take: limit,
+    orderBy: [{ type: "asc" }, { symbol: "asc" }],  // EQ first (alphabetically before others)
+    take: limit * 3, // fetch extra then deduplicate
   });
+
+  // Deduplicate: prefer NSE EQ → BSE EQ → others. Strip suffix for display.
+  const seen = new Map<string, typeof rows[0]>();
+  for (const row of rows) {
+    const base = stripSuffix(row.symbol);
+    const key = `${base}:${row.exchange}`;
+    if (!seen.has(key)) seen.set(key, row);
+    else if (row.type === "EQ" && seen.get(key)!.type !== "EQ") seen.set(key, row);
+  }
+
+  return Array.from(seen.values())
+    .slice(0, limit)
+    .map((r) => ({ ...r, baseSymbol: stripSuffix(r.symbol) }));
 }
 
 export async function symbolCount(): Promise<number> {

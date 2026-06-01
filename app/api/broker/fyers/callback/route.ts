@@ -10,8 +10,11 @@ function html(body: string): Response {
 }
 
 export async function GET(req: Request) {
-  const code = new URL(req.url).searchParams.get("code") ?? "";
-  if (!code) return html("<h2>❌ No auth code received</h2>");
+  const sp = new URL(req.url).searchParams;
+  // Fyers v3 callback: ?s=ok&code=200&auth_code=<JWT>
+  // "code" is the HTTP status (200), "auth_code" is the actual token.
+  const code = sp.get("auth_code") || sp.get("code") || "";
+  if (!code || code === "200") return html("<h2>❌ No auth code received from Fyers. Ensure redirect URI is saved at myapi.fyers.in.</h2>");
   const rows = await prisma.setting.findMany({ where: { key: { in: ["fyers_pending_appid", "fyers_pending_secret"] } } });
   const cfg = Object.fromEntries(rows.map(r => [r.key, r.value]));
   if (!cfg.fyers_pending_appid || !cfg.fyers_pending_secret) return html("<h2>❌ Session expired. Start login again.</h2>");

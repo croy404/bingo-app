@@ -70,14 +70,17 @@ function open() {
   if (!session) return;
   if (socket) { try { socket.removeAllListeners(); socket.disconnect(); } catch { /* ignore */ } }
   connected = false;
-  // re-queue subscribed channels
-  for (const [, info] of subscribed) pending.push({ symbol: info.symbol, exchange: info.exchange, token: "" });
+  // Don't re-queue with empty tokens — the worker calls startBreezeStream every 30s
+  // with freshly resolved tokens, so items will be re-subscribed automatically on the next tick.
   subscribed.clear();
+  // ICICI Breeze Socket.IO auth requires:
+  //   user = idirect_userid  (iciUserId)
+  //   token = session_token  (sessionToken from customerdetails, NOT the raw apiSessionToken OTP)
   socket = io(SERVER, {
     transports: ["websocket"],
     reconnection: false,
     timeout: 15000,
-    extraHeaders: { user: session.iciUserId, token: session.apiSessionToken },
+    extraHeaders: { user: session.iciUserId, token: session.sessionToken },
   });
   socket.on("connect", onConnect);
   socket.on("disconnect", onClose);

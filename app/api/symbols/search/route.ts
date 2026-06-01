@@ -6,6 +6,6 @@ export async function GET(req: Request) {
   const q = searchParams.get("q") ?? "";
   const exchange = searchParams.get("exchange") ?? undefined;
   const limit = Number(searchParams.get("limit") ?? 20);
-  if (!q) return NextResponse.json([]);
+  if (!q || q.length < 1) return NextResponse.json([]);
   return NextResponse.json(await searchSymbols(q, exchange, limit));
 }
