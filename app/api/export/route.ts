@@ -16,7 +16,8 @@ export async function GET(req: Request) {
   let rows: Record<string, unknown>[] = [];
   if (type === "portfolio") {
     rows = (await prisma.portfolio.findMany({ orderBy: { symbol: "asc" } })).map(r => ({
-      symbol: r.symbol, exchange: r.exchange, sector: r.sector, qty: r.qty, avg_price: r.avgPrice,
+      symbol: r.symbol, exchange: r.exchange, category: r.category ?? "equity",
+      account_tag: r.accountTag ?? "", sector: r.sector ?? "", qty: r.qty, avg_price: r.avgPrice,
       buy_date: r.buyDate?.toISOString().slice(0, 10) ?? "", notes: r.notes ?? "",
     }));
   } else if (type === "journal") {

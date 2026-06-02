@@ -11,7 +11,7 @@ const NSE_HEADERS = {
 export interface NiftyStock {
   symbol: string; name: string; sector: string;
   ltp: number; changePercent: number; change: number;
-  volume: number; high52w: number; low52w: number; prevClose: number;
+  volume: number; avgVolume10d: number; high52w: number; low52w: number; prevClose: number;
 }
 
 async function nseNifty50(): Promise<NiftyStock[]> {
@@ -32,6 +32,7 @@ async function nseNifty50(): Promise<NiftyStock[]> {
       changePercent: +(Number(s.pChange) || 0).toFixed(2),
       change: +(Number(s.change) || 0).toFixed(2),
       volume: Number(s.totalTradedVolume) || 0,
+      avgVolume10d: 0, // NSE doesn't expose avg volume in this endpoint
       high52w: +(Number(s.yearHigh) || 0).toFixed(2),
       low52w: +(Number(s.yearLow) || 0).toFixed(2),
       prevClose: +(Number(s.previousClose) || 0).toFixed(2),
@@ -41,7 +42,7 @@ async function nseNifty50(): Promise<NiftyStock[]> {
 async function yahooNifty50(): Promise<NiftyStock[]> {
   // Yahoo batch quote — one HTTP call for all 50 symbols
   const syms = Object.keys(SECTOR_MAP).map((s) => encodeURIComponent(`${s}.NS`)).join(",");
-  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${syms}&fields=regularMarketPrice,regularMarketChangePercent,regularMarketChange,regularMarketVolume,fiftyTwoWeekHigh,fiftyTwoWeekLow,regularMarketPreviousClose,shortName`;
+  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${syms}&fields=regularMarketPrice,regularMarketChangePercent,regularMarketChange,regularMarketVolume,averageDailyVolume10Day,fiftyTwoWeekHigh,fiftyTwoWeekLow,regularMarketPreviousClose,shortName`;
   const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
   const data = await res.json();
   return ((data?.quoteResponse?.result ?? []) as Array<Record<string, unknown>>)
@@ -55,6 +56,7 @@ async function yahooNifty50(): Promise<NiftyStock[]> {
         changePercent: +(Number(q.regularMarketChangePercent) || 0).toFixed(2),
         change: +(Number(q.regularMarketChange) || 0).toFixed(2),
         volume: Number(q.regularMarketVolume) || 0,
+        avgVolume10d: Number(q.averageDailyVolume10Day) || 0,
         high52w: +(Number(q.fiftyTwoWeekHigh) || 0).toFixed(2),
         low52w: +(Number(q.fiftyTwoWeekLow) || 0).toFixed(2),
         prevClose: +(Number(q.regularMarketPreviousClose) || 0).toFixed(2),

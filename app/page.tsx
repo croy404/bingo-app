@@ -144,6 +144,7 @@ const NAV_MAIN: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: "alert-history",label: "Alert History",  icon: <History size={14}/> },
   { id: "options",      label: "Options",        icon: <Layers size={14}/> },
   { id: "filings",      label: "Filings",        icon: <FileText size={14}/> },
+  { id: "correlation",  label: "Correlation",    icon: <BarChart2 size={14}/> },
 ];
 const NAV_BOTTOM: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: "brokers",  label: "Brokers",  icon: <Wifi size={14}/> },
@@ -305,7 +306,7 @@ function ChatPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
 }
 
 // ─── Mobile Nav ───────────────────────────────────────────────────────────────
-type Page = "dashboard"|"watchlist"|"portfolio"|"sip"|"intraday"|"journal"|"screener"|"news"|"alerts"|"alert-history"|"options"|"filings"|"brokers"|"symbols"|"settings";
+type Page = "dashboard"|"watchlist"|"portfolio"|"sip"|"intraday"|"journal"|"screener"|"news"|"alerts"|"alert-history"|"options"|"filings"|"brokers"|"symbols"|"settings"|"correlation";
 function MobileNav({ page, go, onMore }: { page: Page; go: (p:Page)=>void; onMore: ()=>void }) {
   const tabs: {id:Page;icon:React.ReactNode;label:string}[] = [
     {id:"dashboard",icon:<LayoutDashboard size={18}/>,label:"Home"},
@@ -336,6 +337,7 @@ function MobileDrawer({ open, page, go, onClose }: { open:boolean; page:Page; go
     {id:"alert-history",icon:<History size={14}/>,label:"History"},
     {id:"options",icon:<Layers size={14}/>,label:"Options"},
     {id:"filings",icon:<FileText size={14}/>,label:"Filings"},
+    {id:"correlation",icon:<BarChart2 size={14}/>,label:"Correlation"},
     {id:"brokers",icon:<Wifi size={14}/>,label:"Brokers"},
     {id:"symbols",icon:<Database size={14}/>,label:"Symbols"},
     {id:"settings",icon:<Settings2 size={14}/>,label:"Settings"},
@@ -384,6 +386,16 @@ export default function Home() {
   const [filings, setFilings] = useState<{ id: number; exchange: string; symbol?: string; company?: string; category?: string; subject?: string; attachment?: string; createdAt: string }[]>([]);
   const [symStatus, setSymStatus] = useState<{ total: number; byExchange: Record<string,number>; status?: { state?: string } } | null>(null);
   const [streamStatus, setStreamStatus] = useState<{ iciciConnected: boolean; fyersConnected: boolean; streaming: boolean; source?: string; lastTickAgeSec?: number|null } | null>(null);
+
+  // dashboard stats
+  const [stats, setStats] = useState<{ activeAlerts: number; watchlistCount: number; portfolioCount: number; intradayTrades: number; broker: { active: string } } | null>(null);
+  // portfolio tabs
+  const [portTab, setPortTab] = useState<"holdings"|"sectors"|"benchmark">("holdings");
+  const [benchmark, setBenchmark] = useState<{ data: { date: string; niftyReturn: number }[] } | null>(null);
+  // correlation
+  const [corrSyms, setCorrSyms] = useState("RELIANCE,TCS,HDFCBANK,INFY,ICICIBANK");
+  const [corrData, setCorrData] = useState<{ symbols: string[]; matrix: Record<string,Record<string,number>> } | null>(null);
+  const [corrLoading, setCorrLoading] = useState(false);
 
   // overlay panels
   const [riskOpen, setRiskOpen] = useState(false);
@@ -440,12 +452,12 @@ export default function Home() {
 
   // ── data loaders ────────────────────────────────────────────────────────────
   const loadDashboard = useCallback(async () => {
-    const [s, i, n, b, fd] = await Promise.all([
+    const [s, i, n, b, fd, st] = await Promise.all([
       api("/market/status"), api("/market/indices"), api("/market/nifty50"),
-      api("/market/breadth"), api("/market/fii-dii"),
+      api("/market/breadth"), api("/market/fii-dii"), api("/dashboard/stats"),
     ]);
     setMktStatus(s); setIndices(Array.isArray(i)?i:[]); setNifty50(Array.isArray(n)?n:[]);
-    setBreadth(b); setFiiDii(fd?.data ?? []);
+    setBreadth(b); setFiiDii(fd?.data ?? []); if (st?.activeAlerts != null) setStats(st);
   }, []);
 
   const loadWatchlist = useCallback(async () => {
@@ -515,6 +527,8 @@ export default function Home() {
     if (p === "symbols")      { const r = await api("/symbols/status"); setSymStatus(r); }
     if (p === "settings")     { const [s,ai] = await Promise.all([api("/settings"), api("/ai/status")]); setSettings(s); setSettingsForm(s); setAiStatus(ai); }
     if (p === "options")      { const r = await api(`/options?symbol=${optSym}`); setOptions(r); }
+    if (p === "correlation")  { /* user triggers correlation manually */ }
+    if (p === "portfolio")    { const bm = await api("/portfolio/benchmark"); setBenchmark(bm); }
   }, [loadDashboard, loadWatchlist, loadPortfolio, loadSips, loadBrokers, screenerType, idDate, jnDate, optSym]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── initial load & auto-refresh ───────────────────────────────────────────
@@ -629,7 +643,8 @@ export default function Home() {
     dashboard:"Dashboard", watchlist:"Watchlist", portfolio:"Portfolio", sip:"SIP Tracker",
     intraday:"Intraday Log", journal:"Trade Journal", screener:"Screener", news:"Market News",
     alerts:"Alerts", "alert-history":"Alert History", options:"Options Chain",
-    filings:"NSE/BSE Filings", brokers:"Broker Connections", symbols:"Symbol Master", settings:"Settings",
+    filings:"NSE/BSE Filings", brokers:"Broker Connections", symbols:"Symbol Master",
+    settings:"Settings", correlation:"Correlation Matrix",
   };
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -689,6 +704,23 @@ export default function Home() {
           {/* ─── DASHBOARD ─── */}
           {page === "dashboard" && (
             <div className="space-y-4">
+              {/* Stats ribbon */}
+              {stats && (
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                  {[
+                    { label:"Active Alerts", value: stats.activeAlerts, color:"text-amber-400" },
+                    { label:"Watchlist",     value: stats.watchlistCount, color:"" },
+                    { label:"Holdings",      value: stats.portfolioCount, color:"" },
+                    { label:"Trades Today",  value: stats.intradayTrades, color:"" },
+                    { label:"Broker",        value: stats.broker.active === "none" ? "None" : stats.broker.active.toUpperCase(), color: stats.broker.active !== "none" ? "text-green-400" : "text-[var(--fg-d)]" },
+                  ].map(s => (
+                    <div key={s.label} className="bg-[var(--bg-card)] border border-[var(--bd-s)] rounded-lg px-3 py-2">
+                      <div className="text-[10px] text-[var(--fg-d)] uppercase tracking-wide">{s.label}</div>
+                      <div className={`text-lg font-bold tabular-nums mt-0.5 ${s.color}`}>{s.value}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
               {/* Indices */}
               <section>
                 <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Market Indices</h2>
@@ -829,11 +861,21 @@ export default function Home() {
           {/* ─── PORTFOLIO ─── */}
           {page === "portfolio" && (
             <div className="space-y-4">
-              <div className="flex gap-2 flex-wrap">
-                <button className={btn("bg-purple-700 text-white")} disabled={aiBusy} onClick={()=>runAI("Portfolio Risk Score","/ai/risk-score",{})}>🤖 AI Risk Score</button>
-                <a className={btn("bg-[#334155] text-slate-200")} href="/api/export?type=portfolio"><Download size={13} className="inline mr-1"/>Export CSV</a>
+              <div className="flex gap-2 flex-wrap items-center">
+                {/* Tab switcher */}
+                <div className="flex border border-[var(--bd-s)] rounded-lg overflow-hidden">
+                  {(["holdings","sectors","benchmark"] as const).map(t=>(
+                    <button key={t} onClick={()=>{ setPortTab(t); if(t==="benchmark"&&!benchmark) api("/portfolio/benchmark").then(r=>setBenchmark(r)); }}
+                      className={`px-3 py-1.5 text-xs font-medium capitalize transition-colors ${portTab===t?"bg-green-600 text-white":"text-[var(--fg-m)] hover:text-[var(--fg)]"}`}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+                <button className={btn("bg-purple-700 text-white")} disabled={aiBusy} onClick={()=>runAI("Portfolio Risk Score","/ai/risk-score",{})}>🤖 AI Risk</button>
+                <button className={btn("bg-blue-700 text-white")} disabled={aiBusy} onClick={()=>runAI("Weekly Plan","/ai/weekly-plan",undefined)}>📋 Weekly Plan</button>
+                <a className={btn("bg-[var(--bd-s)] text-[var(--fg-m)]")} href="/api/export?type=portfolio"><Download size={13} className="inline mr-1"/>CSV</a>
               </div>
-              {portfolio?.summary && (
+              {portTab === "holdings" && portfolio?.summary && (
                 <div className={`${card} flex gap-6 flex-wrap`}>
                   {[["Invested","totalInvested"],["Current","totalCurrent"],["P&L","totalPnl"],["Return","totalPnlPercent"],["XIRR","xirr"]].map(([label,key])=>(
                     <div key={key}>
@@ -845,7 +887,7 @@ export default function Home() {
                   ))}
                 </div>
               )}
-              <div className={card}>
+              {portTab === "holdings" && <div className={card}>
                 <h3 className="text-sm font-semibold mb-3">Add Holding</h3>
                 <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-9 gap-2">
                   <SymbolCombobox value={pSym} exchange={pEx} onChange={setPSym} onSelect={(s,ex)=>{setPSym(s);setPEx(ex);}} className="col-span-2 sm:col-span-1"/>
@@ -865,8 +907,8 @@ export default function Home() {
                     loadPortfolio(); setPSym("");setPQty("");setPAvg("");setPTag("");
                   }}>Add</button>
                 </div>
-              </div>
-              <div className={card}>
+              </div>}
+              {portTab === "holdings" && <div className={card}>
                 <div className="overflow-x-auto">
                   <table className="w-full"><thead><tr className="border-b border-[var(--bd-s)]">
                     <th className={th}>Symbol</th><th className={th}>Cat</th><th className={th}>Sector</th><th className={`${th} text-right`}>Qty</th><th className={`${th} text-right`}>Avg</th><th className={`${th} text-right`}>LTP</th><th className={`${th} text-right`}>Invested</th><th className={`${th} text-right`}>Current</th><th className={`${th} text-right`}>P&L</th><th className={`${th} text-right`}>%</th><th className={`${th} text-right`}>XIRR</th><th className={th}></th>
@@ -887,9 +929,83 @@ export default function Home() {
                       <td className={td}><button className="text-red-400 hover:text-red-300 px-2 text-xs" onClick={async()=>{await api("/portfolio",{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:h.id})});loadPortfolio();}}>✕</button></td>
                     </tr>
                   ))}</tbody></table>
-                  {!portfolio?.holdings?.length && <p className="text-center text-slate-500 py-8">No holdings yet</p>}
+                  {!portfolio?.holdings?.length && <p className="text-center text-[var(--fg-d)] py-8">No holdings yet</p>}
                 </div>
-              </div>
+              </div>}
+
+              {/* ── Sectors tab ── */}
+              {portTab === "sectors" && (()=>{
+                const holdings = portfolio?.holdings ?? [];
+                const sectors: Record<string, { invested: number; current: number; count: number }> = {};
+                for (const h of holdings) {
+                  const sec = String(h.sector || "Other");
+                  sectors[sec] ??= { invested: 0, current: 0, count: 0 };
+                  sectors[sec].invested += Number(h.invested) || 0;
+                  sectors[sec].current += Number(h.current) || 0;
+                  sectors[sec].count++;
+                }
+                const total = Object.values(sectors).reduce((s, v) => s + v.current, 0) || 1;
+                const sorted = Object.entries(sectors).sort((a, b) => b[1].current - a[1].current);
+                return (
+                  <div className={card}>
+                    <h3 className="text-sm font-semibold mb-4">Sector Allocation</h3>
+                    {!sorted.length && <p className="text-[var(--fg-d)] text-sm">No holdings yet.</p>}
+                    {sorted.map(([sec, d]) => {
+                      const wt = (d.current / total * 100);
+                      const pnl = d.current - d.invested;
+                      return (
+                        <div key={sec} className="mb-3">
+                          <div className="flex justify-between text-sm mb-1">
+                            <span className="font-medium">{sec} <span className="text-[10px] text-[var(--fg-d)]">({d.count})</span></span>
+                            <span className="flex gap-4 tabular-nums">
+                              <span className="text-[var(--fg-m)]">{wt.toFixed(1)}%</span>
+                              <span className={cc(pnl)}>₹{fmt(pnl)}</span>
+                            </span>
+                          </div>
+                          <div className="h-2 rounded-full bg-[var(--bd)] overflow-hidden">
+                            <div className={`h-full rounded-full ${pnl>=0?"bg-green-500":"bg-red-500"}`} style={{width:`${wt}%`}}/>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* ── Benchmark tab ── */}
+              {portTab === "benchmark" && (
+                <div className={card}>
+                  <h3 className="text-sm font-semibold mb-4">Nifty 50 Benchmark (2Y)</h3>
+                  {!benchmark?.data?.length && <p className="text-[var(--fg-d)] text-sm py-4">Loading benchmark data…</p>}
+                  {benchmark?.data?.length && (()=>{
+                    const pts = benchmark.data.slice(-30);
+                    const min = Math.min(...pts.map(p=>p.niftyReturn));
+                    const max = Math.max(...pts.map(p=>p.niftyReturn));
+                    const range = max - min || 1;
+                    const portRet = portfolio?.summary ? ((portfolio.summary.totalPnl / (portfolio.summary.totalInvested||1)) * 100) : 0;
+                    return (
+                      <>
+                        <div className="flex gap-6 mb-4 flex-wrap text-sm">
+                          <div><div className="text-[10px] text-[var(--fg-d)]">NIFTY 50 (2Y)</div><div className={`font-bold tabular-nums ${cc(benchmark.data[benchmark.data.length-1]?.niftyReturn)}`}>{fmtPct(benchmark.data[benchmark.data.length-1]?.niftyReturn)}</div></div>
+                          <div><div className="text-[10px] text-[var(--fg-d)]">Your Portfolio</div><div className={`font-bold tabular-nums ${cc(portRet)}`}>{fmtPct(portRet)}</div></div>
+                          <div><div className="text-[10px] text-[var(--fg-d)]">Alpha</div><div className={`font-bold tabular-nums ${cc(portRet - benchmark.data[benchmark.data.length-1]?.niftyReturn)}`}>{fmtPct(portRet - benchmark.data[benchmark.data.length-1]?.niftyReturn)}</div></div>
+                        </div>
+                        <div className="relative h-24 flex items-end gap-px">
+                          {pts.map((p, i) => (
+                            <div key={i} title={`${p.date}: ${p.niftyReturn}%`}
+                              className={`flex-1 rounded-t-sm ${p.niftyReturn>=0?"bg-green-500/60":"bg-red-500/60"}`}
+                              style={{height:`${Math.max(2, ((p.niftyReturn - min) / range * 100))}%`}}/>
+                          ))}
+                        </div>
+                        <div className="flex justify-between text-[10px] text-[var(--fg-d)] mt-1">
+                          <span>{pts[0]?.date}</span><span>{pts[pts.length-1]?.date}</span>
+                        </div>
+                        <p className="text-[10px] text-[var(--fg-d)] mt-2">Nifty 50 indexed return — Source: Yahoo Finance</p>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
             </div>
           )}
 
@@ -1088,6 +1204,10 @@ export default function Home() {
                   onClick={()=>runAI("Trade Ideas","/ai/trade-ideas",{topGainers:screener.slice(0,5).map((s:Record<string,unknown>)=>({symbol:s.symbol,changePct:s.changePercent}))})}>
                   🤖 AI Trade Ideas
                 </button>
+                <button className={btn("bg-indigo-700 text-white")} disabled={aiBusy}
+                  onClick={()=>runAI("Weekly Plan","/ai/weekly-plan",undefined)}>
+                  📋 Weekly Plan
+                </button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className={card}>
@@ -1237,7 +1357,8 @@ export default function Home() {
               <div className={`${card} flex gap-2 flex-wrap items-center`}>
                 <input className={`${inp} max-w-[160px]`} placeholder="Symbol (NIFTY / BANKNIFTY / stock)" value={optSym} onChange={e=>setOptSym(e.target.value.toUpperCase())}/>
                 <button className={btn("bg-blue-600 text-white")} onClick={async()=>{const r=await api(`/options?symbol=${optSym}`);setOptions(r);}}>Load Chain</button>
-                {options && <span className="text-sm text-slate-400">Underlying: ₹{fmt(Number((options as Record<string,unknown>).underlying))} · PCR: {Number((options as Record<string,unknown>).pcr).toFixed(2)}</span>}
+                {options && <span className="text-sm text-[var(--fg-m)]">Underlying: ₹{fmt(Number((options as Record<string,unknown>).underlying))} · PCR: {Number((options as Record<string,unknown>).pcr).toFixed(2)}</span>}
+              {options && (options as Record<string,unknown>).note ? <span className="text-xs text-amber-400 bg-amber-900/20 px-2 py-1 rounded">{String((options as Record<string,unknown>).note)}</span> : null}
               </div>
               {options && (
                 <div className={`${card} overflow-x-auto`}>
@@ -1294,6 +1415,56 @@ export default function Home() {
                 </div>
               ))}
               {!filings.length && <p className="text-center text-slate-500 py-10">No filings loaded yet</p>}
+            </div>
+          )}
+
+          {/* ─── CORRELATION ─── */}
+          {page === "correlation" && (
+            <div className="space-y-4">
+              <div className={card}>
+                <h3 className="text-sm font-semibold mb-3">Pairwise Correlation (60-day daily returns)</h3>
+                <p className="text-xs text-[var(--fg-d)] mb-3">Enter up to 12 symbols separated by commas. Values near +1 = highly correlated, near -1 = inversely correlated.</p>
+                <div className="flex gap-2">
+                  <input className={`${inp} flex-1`} value={corrSyms} onChange={e=>setCorrSyms(e.target.value.toUpperCase())}
+                    placeholder="RELIANCE,TCS,HDFCBANK,INFY,ICICIBANK"
+                    onKeyDown={async e=>{if(e.key==="Enter"){setCorrLoading(true);const r=await api(`/market/correlation?symbols=${encodeURIComponent(corrSyms)}`);setCorrData(r);setCorrLoading(false);}}}/>
+                  <button className={btn("bg-blue-600 text-white")} disabled={corrLoading} onClick={async()=>{
+                    setCorrLoading(true);
+                    const r=await api(`/market/correlation?symbols=${encodeURIComponent(corrSyms)}`);
+                    setCorrData(r); setCorrLoading(false);
+                  }}>{corrLoading?<Loader2 size={13} className="animate-spin inline"/>:"Compute"}</button>
+                </div>
+              </div>
+              {corrData && corrData.symbols?.length > 0 && (
+                <div className={card}>
+                  <div className="overflow-x-auto">
+                    <table className="text-xs w-full">
+                      <thead><tr>
+                        <th className="py-1 px-2 text-[var(--fg-d)] text-left font-medium">↓ / →</th>
+                        {corrData.symbols.map(s=><th key={s} className="py-1 px-2 text-[var(--fg-m)] font-medium">{s}</th>)}
+                      </tr></thead>
+                      <tbody>{corrData.symbols.map(row=>(
+                        <tr key={row}>
+                          <td className="py-1 px-2 font-semibold">{row}</td>
+                          {corrData.symbols.map(col=>{
+                            const v = corrData.matrix[row]?.[col] ?? 0;
+                            const abs = Math.abs(v);
+                            const bg = v===1?"bg-[var(--bd)]":v>0?`rgba(34,197,94,${abs*0.7})`:`rgba(239,68,68,${abs*0.7})`;
+                            return (
+                              <td key={col} className="py-2 px-2 text-center tabular-nums rounded"
+                                style={{background:bg, color: abs>0.4?"#fff":"var(--fg-m)"}}>
+                                {v===1?"—":v.toFixed(2)}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                  <p className="text-[10px] text-[var(--fg-d)] mt-3">Source: Yahoo Finance · 60-day window · Cached 1h</p>
+                </div>
+              )}
+              {corrData && !corrData.symbols?.length && <p className="text-[var(--fg-d)] text-sm">{String((corrData as Record<string,unknown>).error ?? "No data")}</p>}
             </div>
           )}
 
