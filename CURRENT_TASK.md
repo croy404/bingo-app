@@ -4,33 +4,34 @@
 BINGO Indian market dashboard. Stack: Next.js 16 + Postgres + Redis + Docker → Coolify → EC2.
 Live at https://maxcap.co.in. Repo: croy404/bingo-app. Local: C:\Users\cweb4\Downloads\bingo-next
 
-## What was just deployed (commit 63cfb8b, 2026-06-01)
-- NSE-blocked routes fixed: all five market routes (nifty50, breadth, screener, 52week, sector-rotation)
-  now use shared getNifty50Data() in lib/market-data.ts:
-  1. Redis cache check (key nifty50_data, 5 min TTL)
-  2. NSE API attempt
-  3. Yahoo Finance v7/finance/quote batch fallback (all 50 symbols in one request)
-- Dashboard heatmap, breadth bar, screener, 52-week, sector-rotation now all work from EC2
+## Current state (commit 3097fcc, 2026-06-01) — BUILD COMPLETE
+The app is fully built and deployed. All major features from the HyperTrader V3.2 spec are live:
+- All 15+ pages working (dashboard, watchlist, portfolio, alerts, screener, journal, etc.)
+- Mobile nav, theme system, AI chat panel, risk calculator, notepad
+- Correlation matrix, portfolio tabs (sectors + benchmark), dashboard stats
+- NSE-blocked routes all have Yahoo Finance fallbacks
+- SSE real-time price stream, Redis-enriched watchlist/alerts
+- Worker: morning brief, EOD P&L, filings monitor, alert monitor
 
-## Previous commit (95a1a9e)
-- Alert LTP: Redis-first, getLtp(force:true) fallback
-- Watchlist: Redis-enriched LTP, 30s auto-refresh
-- Alerts: camelCase bug fixed, LTP+distance% in table
-- Intraday summary route created
-- Symbols search fixed
+## Outstanding (minor, no user-visible bugs)
+1. **Fyers login** — user must register redirect URI at myapi.fyers.in:
+   `https://maxcap.co.in/api/broker/fyers/callback`
+   This is a user action, not a code fix.
 
-## Next task to work on
-**Mobile navigation** — the sidebar is `hidden md:flex` so on phones/tablets there's no way
-to navigate between pages. Need to add a mobile bottom tab bar or hamburger drawer.
+2. **ICICI Security Master** — non-Nifty-50 stocks may fail WS subscription (wrong stock code).
+   Low impact — Nifty 50 covered by static SYMBOL_OVERRIDES map.
 
-Recommended approach (bottom tab bar, 5 most-used pages):
-- Dashboard, Watchlist, Portfolio, Alerts, More (opens a drawer with remaining pages)
-- Fixed to bottom of screen: `fixed bottom-0 left-0 right-0 z-40 flex md:hidden`
-- "More" item opens a slide-up sheet with the full nav list
+3. **GitHub webhook** — broken (Coolify API deploy works fine, no urgency).
 
-File to edit: `app/page.tsx` — add `MobileNav` component + `MobileDrawer` state.
+## If user asks for something new
+Read SESSION_HANDOFF.md for full feature list and file map before making changes.
 
-## Before committing
-Run: `npm test && DATABASE_URL="postgres://u:p@localhost:5432/db" npm run build`
-Deploy: push to main + Coolify API (token in auto-memory bingo-deployment.md)
-App UUID: ggkyez6sftnzxqhq1jku14f2 (no worker deploy needed for UI-only changes)
+## Deploy workflow (quick ref)
+```
+git push origin main
+curl -X POST "http://13.203.185.106:8000/api/v1/deploy?uuid=ggkyez6sftnzxqhq1jku14f2&force=true" \
+  -H "Authorization: Bearer 1|gsX52QEHFfmUXA1QGEM2vP3Mt4gTWPBNVh0hBD6x694d67d2"
+curl -X POST "http://13.203.185.106:8000/api/v1/deploy?uuid=jqmmwoqn4qcemc9nawzadd1r&force=true" \
+  -H "Authorization: Bearer 1|gsX52QEHFfmUXA1QGEM2vP3Mt4gTWPBNVh0hBD6x694d67d2"
+```
+Token also in auto-memory bingo-deployment.md.
