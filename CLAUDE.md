@@ -12,7 +12,7 @@ This file is read at the start of every session — keep it accurate and concise
 - **Coolify** orchestrates both containers on a single EC2 box
 
 ## Live URLs / infra
-- App: **https://maxcap.co.in** (GoDaddy domain → EC2 EIP, Coolify Traefik + Let's Encrypt SSL)
+- App: **https://13-203-185-106.sslip.io** (Coolify Traefik + sslip.io HTTPS, no custom domain)
 - EC2: t3.medium, Ubuntu 24.04, **ap-south-1 (Mumbai)**, Elastic IP **13.203.185.106**
 - Coolify dashboard: http://13.203.185.106:8000
 - SSH: `ssh -i C:\Users\cweb4\Downloads\BINGO.pem ubuntu@13.203.185.106` (docker needs `sudo`)

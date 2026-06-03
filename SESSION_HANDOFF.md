@@ -6,7 +6,7 @@ Read `CLAUDE.md` first for quick guide. Secrets in local auto-memory `bingo-depl
 
 ## 1. Stack (do not change)
 - GitHub (`croy404/bingo-app`, branch `main`) → Coolify → AWS EC2 t3.medium ap-south-1
-- **App** `/Dockerfile` Next.js 16, port 3000, `https://maxcap.co.in` — UUID `ggkyez6sftnzxqhq1jku14f2`
+- **App** `/Dockerfile` Next.js 16, port 3000, `https://13-203-185-106.sslip.io` — UUID `ggkyez6sftnzxqhq1jku14f2`
 - **Worker** `/Dockerfile.worker` tsx, no port — UUID `jqmmwoqn4qcemc9nawzadd1r`
 - Postgres 16 (Prisma, `prisma db push` on boot) + Redis 7 (ioredis)
 - Deploy: `git push` → POST to Coolify API (token in auto-memory). Never rely on GitHub webhook.
@@ -57,7 +57,7 @@ Read `CLAUDE.md` first for quick guide. Secrets in local auto-memory `bingo-depl
 ## 3. Outstanding items (minor — core is complete)
 
 1. **User action required** — Fyers redirect URI must be registered at myapi.fyers.in:
-   `https://maxcap.co.in/api/broker/fyers/callback`
+   `https://13-203-185-106.sslip.io/api/broker/fyers/callback`
    Until done, Fyers OAuth will fail. ICICI works.
 
 2. **ICICI Security Master** — `resolveSymbol()` uses static `SYMBOL_OVERRIDES` (covers Nifty 50).
@@ -92,7 +92,7 @@ app/globals.css           — CSS variable themes (dark/light/sepia)
 ## 5. Env vars (set in Coolify on BOTH app + worker)
 ```
 DATABASE_URL  REDIS_URL  CRON_SECRET=bingo_cron_secret_2026
-NODE_ENV=production  APP_URL=https://maxcap.co.in
+NODE_ENV=production  APP_URL=https://13-203-185-106.sslip.io   ← sslip.io (no custom domain)
 GROQ_API_KEY  CEREBRAS_API_KEY  OPENROUTER_API_KEY
 ```
 

@@ -1486,8 +1486,8 @@ export default function Home() {
                   <p className="text-xs font-semibold text-slate-400 mb-1">ONE-TIME SETUP — REDIRECT URL</p>
                   <p className="text-xs text-slate-500 mb-2">In the <b>api.icicidirect.com</b> developer portal, set your app's <b>Redirect URL</b> to:</p>
                   <div className="flex items-center gap-2 bg-[#1e293b] rounded px-3 py-2">
-                    <code className="text-green-400 text-xs flex-1">https://maxcap.co.in/api/broker/icici/oauth-callback</code>
-                    <button onClick={()=>navigator.clipboard?.writeText("https://maxcap.co.in/api/broker/icici/oauth-callback")} className="text-slate-400 hover:text-white"><Copy size={12}/></button>
+                    <code className="text-green-400 text-xs flex-1">{typeof window !== "undefined" ? window.location.origin : ""}/api/broker/icici/oauth-callback</code>
+                    <button onClick={()=>navigator.clipboard?.writeText(window.location.origin+"/api/broker/icici/oauth-callback")} className="text-slate-400 hover:text-white"><Copy size={12}/></button>
                   </div>
                 </div>
                 {iciciStatus?.connected ? (
